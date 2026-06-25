@@ -327,7 +327,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         Button playPauseButton = CreateOverlayIconButton("⏯", TogglePlayPause, "Pause / play");
         Button nextButton = CreateOverlayIconButton("⏭", StartNextSong, "Next song");
         Button searchButton = CreateOverlayButton("🔍 Search", ToggleSearchPanel);
-        Button queueButton = CreateOverlayButton("📋 Que", ToggleQueuePanel);
+        Button queueButton = CreateOverlayButton("📋 Queue", ToggleQueuePanel);
         Button historyButton = CreateOverlayButton("🕘 History", ToggleHistoryPanel);
         Button settingsButton = CreateOverlayIconButton("⚙", ToggleSettingsPanel, "BetterJukebox settings");
 
@@ -1720,7 +1720,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         row.Add(label);
 
         Button playNowButton = CreateSmallPanelButton("Play now", () => PlaySongNow(songMeta));
-        Button queueButton = CreateSmallPanelButton("Que", () => AddSongToQueue(songMeta));
+        Button queueButton = CreateSmallPanelButton("Queue", () => AddSongToQueue(songMeta));
 
         row.Add(playNowButton);
         row.Add(queueButton);
@@ -1738,7 +1738,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
         if (betterJukeboxQueue.Count == 0)
         {
-            queueResultsContainer.Add(CreatePanelLabel("Quen är tom. Next song väljs enligt spelläget."));
+            queueResultsContainer.Add(CreatePanelLabel("Your queue is empty."));
             return;
         }
 
