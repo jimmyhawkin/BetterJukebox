@@ -1,5 +1,4 @@
-<img width="1254" height="1254" alt="BetterJukebox" src="https://github.com/user-attachments/assets/04bb7307-a9d8-424a-aac5-4fec7cd91f55" />
-
+<img width="1254" height="1254" alt="BetterJukebox" src="https://github.com/user-attachments/assets/c95cd769-3bf2-400c-9398-ba196592738e" />
 
 <img width="1762" height="116" alt="image" src="https://github.com/user-attachments/assets/502c25f3-0a67-4ec1-b488-61d0f79fdf95" />
 Mod for Melody Mania
