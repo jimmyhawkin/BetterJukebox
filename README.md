@@ -4,7 +4,7 @@ Mod for Melody Mania
 BetterJukebox is a quality-of-life mod for **Melody Mania** that transforms the Sing experience into a modern jukebox with quick controls, instant search, queue management and automatic playback.
 
 The goal of the mod is simple:
-A Simple automated Jukebox with quest and history. 
+A Simple automated Jukebox with que's and history. 
 
 ---
 
