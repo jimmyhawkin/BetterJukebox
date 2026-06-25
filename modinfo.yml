@@ -1,0 +1,20 @@
+name: Better Jukebox
+version: 1.0.0-rc2
+description : |
+  BetterJukebox v1.0 RC2
+
+  - Stable v0.63 base
+  - Sing! button
+  - Settings panel with General and Controls options
+  - Disable BetterJukebox button
+  - Fade in/fade out controlled by settings
+  - Auto-start flow from v0.63
+  - Search input fix for M/P/R shortcuts preserved
+
+authors:
+  - Jimmy Berglund
+
+requiredTypes:
+  - System.Reflection.MethodInfo
+  - System.Reflection.BindingFlags
+  - System.Reflection.PropertyInfo
