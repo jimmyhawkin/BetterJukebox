@@ -1,5 +1,5 @@
 # BetterJukebox
-
+<img width="1762" height="116" alt="image" src="https://github.com/user-attachments/assets/502c25f3-0a67-4ec1-b488-61d0f79fdf95" />
 Mod for Melody Mania
 BetterJukebox is a quality-of-life mod for **Melody Mania** that transforms the Sing experience into a modern jukebox with quick controls, instant search, queue management and automatic playback.
 
