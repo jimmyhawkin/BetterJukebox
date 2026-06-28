@@ -7,222 +7,185 @@
 <img width="1863" height="1142" alt="Purplebar" src="https://github.com/user-attachments/assets/301e2366-e25d-4bf4-80df-e85fa7c97d3b" />
 <img width="1835" height="1089" alt="Graybar" src="https://github.com/user-attachments/assets/cc02e705-dc35-4b00-bae5-6c267c59a1e5" />
 
+# BetterJukebox
 
-## Modern Jukebox Mod for Melody Mania
+## Modern Karaoke Jukebox for Melody Mania
 
-BetterJukebox is a quality-of-life mod for **Melody Mania** that transforms the Sing experience into a modern karaoke jukebox.
+BetterJukebox is a quality-of-life mod for **Melody Mania** that transforms the Sing experience into a modern karaoke jukebox while remaining fully compatible with the game's native systems.
 
-Instead of constantly returning to the song browser, BetterJukebox keeps the music going with automatic playback, a modern in-game overlay, advanced queue management, album artwork, Companion App synchronization and a polished user interface.
+Instead of constantly returning to the song browser, BetterJukebox keeps the music flowing with a modern in-game overlay, native queue management, Companion App synchronization, album artwork, player information and extensive customization.
 
-The goal is simple:
+**The goal is simple:**
 
-**Keep the party going without interrupting the music.**
+> Keep the party going without interrupting the music.
 
 ---
 
 # Features
 
-## 🎵 Automatic Playback
+## Modern Overlay
 
-Turn Melody Mania into an automatic karaoke jukebox.
+A clean animated overlay that appears when needed.
 
-Features:
-
-* Automatically opens Sing mode
-* Automatically starts playing music
-* Random song selection
-* Continuous playback
-* One click away from singing
-
-Perfect for parties where music should never stop.
-
----
-
-## 🎮 Modern Overlay
-
-A clean overlay that appears whenever you move the mouse.
-
-Features:
-
-* Sing!
-* Previous Song
-* Play / Pause
-* Next Song
 * Search
 * Queue
 * History
 * Settings
-
-The overlay automatically fades away when idle and reappears when needed.
-
----
-
-## 🔍 Smart Search
-
-Search your entire music library instantly.
-
-Features:
-
-* Live filtering
-* Album artwork
-* Play Now
-* Add to Queue
-* Scrollable results
-* ESC closes Search
-* X button closes Search
-* Game shortcuts are disabled while typing
+* Previous Song
+* Play / Pause
+* Next Song
+* Auto hide
+* Smooth fade animations
 
 ---
 
-## 🎶 Advanced Queue Manager
+## Native Queue Integration
 
-Create and manage your karaoke playlist while music is playing.
+BetterJukebox no longer maintains its own queue.
+
+Everything uses Melody Mania's native queue system.
 
 Features:
 
-* Queue songs from the PC
-* Queue songs from the Companion App
+* Queue songs from PC
+* Queue songs from Companion App
 * Full two-way synchronization
-* Drag & Drop reordering
-* Move songs up
-* Move songs down
+* Native drag & drop
 * Remove songs
 * Clear Queue
 * Shuffle Queue
 * Queue counter
+* Player & microphone assignments
 * Album artwork
-* Colored microphone icons
-* Scrollable queue
-* ESC closes Queue
-* X button closes Queue
-
-Unlike older versions, BetterJukebox uses Melody Mania's native QueueManager for maximum compatibility.
 
 ---
 
-## 📱 Companion App Integration
+## Companion App Synchronization
 
-BetterJukebox fully integrates with the Melody Mania Companion App.
+PC and Companion now behave identically.
 
-Features:
+* Shared queue
+* Shared player assignments
+* Shared microphone assignments
+* Shared song information
 
-* Queue songs from your phone
-* Queue songs from the PC
-* Live synchronization
-* Correct song names
-* Shared queue between all devices
-
-No separate queue system is used.
+Songs queued on either device instantly appear everywhere.
 
 ---
 
-## 💿 Album Artwork
+## Smart Search
 
-Album artwork is displayed throughout the interface.
+Quickly find songs while music keeps playing.
 
-Available in:
-
-* Search
-* Queue
-* History
-
-(Coming soon: Now Playing)
-
----
-
-## 🎤 Player & Microphone Display
-
-See who queued each song.
-
-Features:
-
-* Colored microphone icons
-* Player names
-* Multi-player support
+* Live search
+* Album artwork
+* Queue song
+* Play immediately
+* Bottom search bar for faster access
+* Keyboard friendly
+* ESC to close
 
 ---
 
-## 📜 Song History
+## Queue Manager
 
-Quickly replay recently played songs.
+Manage your karaoke playlist without interrupting playback.
 
-Features:
+* Drag & Drop
+* Queue counter
+* Album artwork
+* Player assignments
+* Microphone colors
+* Bottom action buttons
+* Scrollable list
+
+---
+
+## Song History
+
+Replay recently played songs instantly.
 
 * Album artwork
+* Replay with one click
 * Scrollable history
-* Instant replay
 
 ---
 
-## 🎨 Modern User Interface
+## Now Playing
 
-Every window follows the same design language.
+Modern information panel showing:
 
-Features:
-
-* Responsive windows
-* Fixed popup sizes
-* Screen-size aware layout
-* Scrollbars when needed
-* ESC closes popups
-* X button closes popups
-* Fade animations
-* Consistent panel design
-
-Only one popup is open at a time for a clean workflow.
+* Album artwork
+* Song title
+* Artist
+* Upcoming songs
+* Player assignments
+* Microphone colors
+* Auto hide during singing
 
 ---
 
-## 🎭 Themes
+## Themes
 
-Choose your preferred appearance.
+Choose between multiple visual styles.
 
-Available themes:
+* Standard
+* DiscoPurple
 
-### Standard
-
-Clean dark interface with subtle styling.
-
-### DiscoPurple
-
-Modern dark interface with purple accents, borders and hover effects.
-
-Themes can be changed directly from the Settings menu.
+Theme changes update the interface instantly.
 
 ---
 
-## ⚙️ Settings
+## Display Settings
 
-Built-in settings menu.
+Choose exactly what information you want to see.
 
-Current options include:
+Options include:
 
-* Enable Overlay
-* Auto Open Sing
-* Auto Play Random Song
-* Shuffle
-* Show Overlay
-* Fade Animations
-* Auto Hide Menu
-* Animation Speed
-* Disable Vanilla Pause Button
-* Shake Mouse To Show Menu
-* Hide Mouse After Timeout
-* UI Theme Selection
+* Album artwork in Search
+* Album artwork in Queue
+* Album artwork in History
+* Player & microphone preview in Now Playing
+
+Perfect for lower-end hardware or users who prefer a cleaner interface.
+
+---
+
+## Automatic Playback
+
+Turn Melody Mania into an automatic karaoke jukebox.
+
+* Auto open Sing
+* Auto Play
+* Random songs
+* Continuous playback
+* Party mode
+
+---
+
+## Performance
+
+Designed to stay lightweight.
+
+* Album artwork caching
+* Native Melody Mania APIs
+* Minimal UI rebuilding
+* Shared queue with Companion
+* Optimized UI updates
 
 ---
 
 # Installation
 
-Extract the BetterJukebox folder into one of the following locations:
+Extract the **BetterJukebox** folder into:
 
-```
+```text
 AppData\LocalLow\melodymania\Melody Mania\Mods\
 ```
 
 or
 
-```
+```text
 Melody Mania\Mods\
 ```
 
@@ -237,31 +200,24 @@ Enable the mod from Melody Mania's Mod Manager.
 
 ---
 
-# Current Highlights
+# Highlights
 
-* Modern in-game jukebox interface
-* Native Melody Mania Queue integration
-* Full Companion App synchronization
-* Album artwork throughout the UI
+* Native Melody Mania integration
+* Modern animated interface
+* Companion App synchronization
+* Native player & microphone assignments
 * Advanced queue management
-* Drag & Drop queue editing
-* Colored microphone indicators
+* Album artwork throughout the UI
+* Optional display settings
+* Multiple themes
+* Automatic playback
 * Responsive popup windows
-* Multiple UI themes
-* Auto-hide overlay
-* Queue counter
-* Modern animations
+* Optimized performance
 
 ---
 
-# Roadmap
+BetterJukebox is designed to feel like an official Melody Mania update rather than a traditional mod.
 
-Planned features include:
-
-* Album artwork in Now Playing
-* Additional UI themes
-* More playback controls
-* Extra customization options
 * Continued UI polish
 
 ---
