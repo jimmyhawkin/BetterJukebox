@@ -1,7 +1,9 @@
 # BetterJukebox
 
 <img width="654" height="654" alt="BetterJukebox" src="https://github.com/user-attachments/assets/c95cd769-3bf2-400c-9398-ba196592738e" />
-
+<img width="2414" height="1327" alt="New menu" src="https://github.com/user-attachments/assets/29a45b17-5b99-4bc0-a934-157c452e7d5d" />
+<img width="2541" height="1317" alt="Search funktion" src="https://github.com/user-attachments/assets/59cbf854-024d-4479-9500-15b5aab0e22d" />
+<img width="2246" height="1332" alt="Queue" src="https://github.com/user-attachments/assets/214ef1c5-fed0-40b2-901a-f43f2e0260cb" />
 <img width="1863" height="1142" alt="Purplebar" src="https://github.com/user-attachments/assets/301e2366-e25d-4bf4-80df-e85fa7c97d3b" />
 <img width="1835" height="1089" alt="Graybar" src="https://github.com/user-attachments/assets/cc02e705-dc35-4b00-bae5-6c267c59a1e5" />
 
