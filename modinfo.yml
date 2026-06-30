@@ -1,15 +1,21 @@
 name: Better Jukebox
-version: 1.0.0-rc2
+version: 1.4.5.14
 description : |
-  BetterJukebox v1.0 RC2
+  BetterJukebox v1.4.5.14 - Hide Lyrics Default Off
 
-  - Stable v0.63 base
-  - Sing! button
-  - Settings panel with General and Controls options
-  - Disable BetterJukebox button
-  - Fade in/fade out controlled by settings
-  - Auto-start flow from v0.63
-  - Search input fix for M/P/R shortcuts preserved
+  - Hide Lyrics is now Off by default for new installs
+  - Existing BetterJukeboxSettings.json values are preserved
+  - Builds on v1.4.5.13 Playlist ESC Step Back Fix
+
+  BetterJukebox v1.4.5.14 - Hide Lyrics Default Off
+
+  - Adds Playlists inside the Search window next to All and Favorites
+  - Adds Playlists.json storage using the same native song id as Favorites
+  - Adds create, rename and delete playlist actions
+  - Adds add-to-playlist from song rows
+  - Adds queue all and shuffle playlist actions
+  - Keeps the main overlay menu unchanged
+  - Builds on v1.4.4.16 Favorites Silent Toggle
 
 authors:
   - Jimmy Berglund
@@ -18,3 +24,26 @@ requiredTypes:
   - System.Reflection.MethodInfo
   - System.Reflection.BindingFlags
   - System.Reflection.PropertyInfo
+  - System.Reflection.ParameterInfo
+  - System.Security.Cryptography.MD5
+  - System.Text.Encoding
+
+
+# v1.4.4.8 - Favorites UX Polish
+# Adds Favorites submenu and Search visual polish.
+# Keeps queue and Companion sync logic unchanged.
+
+# v1.4.4.12 - Compile hotfix for favorite sparkle button capture.
+# Keeps favorite sparkle feedback and gray theme search border refresh.
+
+# v1.4.4.14 - Favorites Animated Sparkle Theme Border Fix
+# Improves favorite sparkle burst style and restores the theme-aware Favorites filter row border.
+
+# v1.4.4.15 - Favorites Sparkle Settings Toggle
+# Adds a setting to enable or disable favorite sparkle animation. Default is off.
+
+# v1.4.4.16 - Favorites Silent Toggle
+# Removes favorite add/remove notifications. Visual star state remains the feedback.
+
+# v1.4.5.8 - Playlist Add Feedback
+# Adds Add to Playlist to History rows and aligns button order with Search.
