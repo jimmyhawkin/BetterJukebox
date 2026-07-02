@@ -180,3 +180,9 @@ This ensures:
 # ❤️ Built for the Melody Mania community
 
 BetterJukebox is a passion project created to make karaoke nights even better while staying true to the original Melody Mania experience.
+
+---
+
+# ❤️ Built for the Melody Mania community
+
+BetterJukebox is a passion project created to make karaoke nights even better while staying true to the original Melody Mania experience.
