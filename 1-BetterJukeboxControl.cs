@@ -129,10 +129,27 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
     private Label searchInputIcon;
     private Button searchFavoritesFilterButton;
     private Button searchPlaylistsFilterButton;
+    private Button searchSelectModeButton;
     private VisualElement searchFavoritesActionRow;
     private VisualElement searchPlaylistsActionRow;
+    private VisualElement multiSelectActionRow;
     private VisualElement playlistDialogPanel;
     private SongMeta playlistDialogSongMeta;
+    private readonly Dictionary<string, SongMeta> multiSelectedSongsById = new Dictionary<string, SongMeta>();
+    private readonly List<string> multiSelectedSongIdOrder = new List<string>();
+    private bool multiSelectMode;
+    private SongMeta pendingMultiSelectLongPressSong;
+    private VisualElement pendingMultiSelectLongPressRow;
+    private float pendingMultiSelectLongPressStartedAt;
+    private bool pendingMultiSelectLongPressTriggered;
+    private const float MultiSelectLongPressSeconds = 0.50f;
+
+    private int searchRenderGeneration;
+    private List<SongMeta> pendingSearchRenderMatches = new List<SongMeta>();
+    private VisualElement pendingSearchRenderSection;
+    private int pendingSearchRenderIndex;
+    private const int SearchRenderBatchSize = 50;
+
     private TextField playlistNameTextField;
     private int playlistNameCaretIndex;
     private Action<string> playlistNameDialogSubmitAction;
@@ -150,6 +167,9 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
     private Label companionVersionLabel;
     private VisualElement companionDeviceListContainer;
     private Label companionDeviceCountLabel;
+    private VisualElement settingsCompanionStatusIcon;
+    private Label settingsCompanionStatusLabel;
+    private Label settingsCompanionDeviceCountLabel;
     private float lastCompanionHubRefreshTimeInSeconds;
     private string lastCompanionHubSignature;
     private VisualElement historyPanel;
@@ -191,6 +211,28 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
     private int draggingQueueIndex = -1;
     private int currentQueueDropIndex = -1;
     private VisualElement queueDragGhost;
+    private Button queueHoldMoveButton;
+    private VisualElement queueHoldMoveRow;
+    private int queueHoldMoveIndex = -1;
+    private int queueHoldMoveDirection;
+    private float queueHoldMoveStartedAt = -1f;
+    private bool queueHoldMoveSuppressNextClick;
+    private const float QueueHoldMoveGraceSeconds = 0.18f;
+    private const float QueueHoldMoveReadySeconds = 0.65f;
+
+    private Button playlistHoldMoveButton;
+    private VisualElement playlistHoldMoveRow;
+    private BetterJukeboxPlaylist playlistHoldMovePlaylist;
+    private SongMeta playlistHoldMoveSongMeta;
+    private int playlistHoldMoveDirection;
+    private float playlistHoldMoveStartedAt = -1f;
+    private bool playlistHoldMoveSuppressNextClick;
+    private int draggingPlaylistIndex = -1;
+    private int currentPlaylistDropIndex = -1;
+    private VisualElement playlistDragGhost;
+    private BetterJukeboxPlaylist draggingPlaylist;
+    private readonly List<VisualElement> playlistRowElements = new List<VisualElement>();
+    private readonly List<SongMeta> playlistRowSongMetas = new List<SongMeta>();
     private readonly List<VisualElement> queueRowElements = new List<VisualElement>();
     private readonly static Dictionary<object, string> queueEntryDisplayNameOverrides = new Dictionary<object, string>();
     private readonly static Dictionary<object, SongMeta> queueEntrySongMetaOverrides = new Dictionary<object, SongMeta>();
@@ -735,7 +777,31 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         actionOverlay.Add(buttonRow);
 
         uiDocument.rootVisualElement.Add(actionOverlay);
-        Debug.Log("BetterJukebox v1.4.5.14 loaded - Hide Lyrics Default Off");
+        Debug.Log("BetterJukebox v1.4.5.27 loaded - Native SongMeta Search Cleanup");
+        LogNativeSongMetaSearchReadyOnce();
+    }
+
+    private static bool nativeSongMetaSearchReadyLogged;
+
+    private void LogNativeSongMetaSearchReadyOnce()
+    {
+        if (nativeSongMetaSearchReadyLogged)
+        {
+            return;
+        }
+        nativeSongMetaSearchReadyLogged = true;
+
+        try
+        {
+            int count = songMetaManager != null && songMetaManager.GetSongMetas() != null
+                ? songMetaManager.GetSongMetas().Count()
+                : 0;
+            Debug.Log("BetterJukebox Native SongMeta search initialized (" + count + " songs)");
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning("BetterJukebox Native SongMeta search initialization count failed: " + ex.Message);
+        }
     }
 
     private void CreateBrandLogo()
@@ -1049,6 +1115,13 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
         if (searchPanelIsVisible)
         {
+            if (multiSelectMode)
+            {
+                ClearMultiSelectSelection(true);
+                lastOverlayActivityTimeInSeconds = Time.unscaledTime;
+                return;
+            }
+
             if (!string.IsNullOrWhiteSpace(selectedPlaylistName))
             {
                 selectedPlaylistName = null;
@@ -1097,6 +1170,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         UpdatePlaylistFilterButtonText();
         UpdateFavoriteActionRowVisibility();
         UpdatePlaylistActionRowVisibility();
+        UpdateMultiSelectActionRowVisibility();
         UpdateSearchResults(searchTextField != null ? searchTextField.value : "");
         if (searchTextField != null)
         {
@@ -1122,9 +1196,10 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         searchFilterRow.style.justifyContent = Justify.Center;
         searchFilterRow.style.backgroundColor = new Color(0f, 0f, 0f, 0.18f);
         ApplyThemedBorder(searchFilterRow);
-        searchFilterRow.Add(CreateSmallPanelButton("All", SelectAllSearchFilterMode));
+        searchFilterRow.Add(CreateSmallPanelButton("All", () => { CancelMultiSelectForNavigation(); SelectAllSearchFilterMode(); }));
         searchFavoritesFilterButton = CreateSmallPanelButton(GetFavoritesFilterButtonText(), () =>
         {
+            CancelMultiSelectForNavigation();
             showOnlyFavoriteSearchResults = true;
             showOnlyPlaylistSearchResults = false;
             showOnlyHistorySearchResults = false;
@@ -1137,6 +1212,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         searchFilterRow.Add(searchFavoritesFilterButton);
         searchPlaylistsFilterButton = CreateSmallPanelButton(GetPlaylistsFilterButtonText(), () =>
         {
+            CancelMultiSelectForNavigation();
             showOnlyFavoriteSearchResults = false;
             showOnlyPlaylistSearchResults = true;
             showOnlyHistorySearchResults = false;
@@ -1146,6 +1222,11 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
             UpdateSearchResults(searchTextField != null ? searchTextField.value : "");
         });
         searchFilterRow.Add(searchPlaylistsFilterButton);
+        VisualElement searchFilterSpacer = new VisualElement();
+        searchFilterSpacer.style.flexGrow = 1f;
+        searchFilterRow.Add(searchFilterSpacer);
+        searchSelectModeButton = CreateSmallPanelButton("Select", ToggleMultiSelectMode);
+        searchFilterRow.Add(searchSelectModeButton);
         searchPanel.Add(searchFilterRow);
 
         searchFavoritesActionRow = new VisualElement();
@@ -1187,6 +1268,20 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         searchPlaylistsActionRow.style.backgroundColor = new Color(0f, 0f, 0f, 0f);
         searchPanel.Add(searchPlaylistsActionRow);
         UpdatePlaylistActionRowVisibility();
+
+        multiSelectActionRow = new VisualElement();
+        multiSelectActionRow.name = "betterJukeboxMultiSelectActionRow";
+        multiSelectActionRow.style.flexDirection = FlexDirection.Row;
+        multiSelectActionRow.style.alignItems = Align.Center;
+        multiSelectActionRow.style.marginTop = 0f;
+        multiSelectActionRow.style.marginBottom = 6f;
+        multiSelectActionRow.style.paddingLeft = 0f;
+        multiSelectActionRow.style.paddingRight = 0f;
+        multiSelectActionRow.style.paddingTop = 0f;
+        multiSelectActionRow.style.paddingBottom = 0f;
+        multiSelectActionRow.style.backgroundColor = new Color(0f, 0f, 0f, 0f);
+        searchPanel.Add(multiSelectActionRow);
+        UpdateMultiSelectActionRowVisibility();
 
         ScrollView searchScrollView = new ScrollView(ScrollViewMode.Vertical);
         searchScrollView.name = "betterJukeboxSearchScrollView";
@@ -1325,20 +1420,54 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
     private Color GetSearchInputBackgroundColor()
     {
-        if (!IsDiscoPurpleTheme())
+        int theme = GetUiThemeIndex();
+        if (theme == 2)
         {
-            return new Color(0.012f, 0.014f, 0.018f, 0.96f);
+            return new Color(0.008f, 0.018f, 0.010f, 0.96f);
         }
-        return new Color(0.012f, 0.011f, 0.016f, 0.96f);
+        if (theme == 3)
+        {
+            return new Color(0.008f, 0.012f, 0.022f, 0.96f);
+        }
+        if (theme == 4)
+        {
+            return new Color(0.020f, 0.008f, 0.010f, 0.96f);
+        }
+        if (theme == 5)
+        {
+            return new Color(0.020f, 0.014f, 0.006f, 0.96f);
+        }
+        if (theme == 1)
+        {
+            return new Color(0.012f, 0.011f, 0.016f, 0.96f);
+        }
+        return new Color(0.012f, 0.014f, 0.018f, 0.96f);
     }
 
     private Color GetSearchInputActiveBackgroundColor()
     {
-        if (!IsDiscoPurpleTheme())
+        int theme = GetUiThemeIndex();
+        if (theme == 2)
         {
-            return new Color(0.018f, 0.021f, 0.027f, 0.98f);
+            return new Color(0.012f, 0.028f, 0.016f, 0.98f);
         }
-        return new Color(0.018f, 0.016f, 0.024f, 0.98f);
+        if (theme == 3)
+        {
+            return new Color(0.012f, 0.018f, 0.034f, 0.98f);
+        }
+        if (theme == 4)
+        {
+            return new Color(0.032f, 0.012f, 0.014f, 0.98f);
+        }
+        if (theme == 5)
+        {
+            return new Color(0.034f, 0.024f, 0.010f, 0.98f);
+        }
+        if (theme == 1)
+        {
+            return new Color(0.018f, 0.016f, 0.024f, 0.98f);
+        }
+        return new Color(0.018f, 0.021f, 0.027f, 0.98f);
     }
 
     private void ApplySearchTextFieldInnerTheme(VisualElement element)
@@ -1513,10 +1642,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         statusTitle.style.marginBottom = 8f;
         statusCard.Add(statusTitle);
 
-        companionStatusLabel = CreatePanelLabel("🟡 Waiting for devices...");
-        companionStatusLabel.style.color = Color.white;
-        companionStatusLabel.style.opacity = 0.95f;
-        companionStatusLabel.style.whiteSpace = WhiteSpace.Normal;
+        companionStatusLabel = CreateCompanionStatusLabel(0);
         companionStatusLabel.style.marginBottom = 8f;
         statusCard.Add(companionStatusLabel);
 
@@ -1621,31 +1747,47 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
     private VisualElement CreateCompanionAppQrCodeElement()
     {
+        return CreateCompanionAppQrCodeElement(4f, 8f, 8f);
+    }
+
+    private VisualElement CreateSmallCompanionAppQrCodeElement()
+    {
+        return CreateCompanionAppQrCodeElement(2f, 5f, 6f);
+    }
+
+    private VisualElement CreateCompanionAppQrCodeElement(float cellSize, float padding, float radius)
+    {
         VisualElement frame = new VisualElement();
         frame.style.flexDirection = FlexDirection.Column;
-        frame.style.paddingLeft = 8f;
-        frame.style.paddingRight = 8f;
-        frame.style.paddingTop = 8f;
-        frame.style.paddingBottom = 8f;
+        frame.style.paddingLeft = padding;
+        frame.style.paddingRight = padding;
+        frame.style.paddingTop = padding;
+        frame.style.paddingBottom = padding;
         frame.style.backgroundColor = Color.white;
-        frame.style.borderTopLeftRadius = 8f;
-        frame.style.borderTopRightRadius = 8f;
-        frame.style.borderBottomLeftRadius = 8f;
-        frame.style.borderBottomRightRadius = 8f;
+        frame.style.borderTopLeftRadius = radius;
+        frame.style.borderTopRightRadius = radius;
+        frame.style.borderBottomLeftRadius = radius;
+        frame.style.borderBottomRightRadius = radius;
         frame.pickingMode = PickingMode.Ignore;
+        frame.style.flexGrow = 0f;
+        frame.style.flexShrink = 0f;
 
         for (int rowIndex = 0; rowIndex < CompanionAppQrRows.Length; rowIndex++)
         {
             string rowText = CompanionAppQrRows[rowIndex];
             VisualElement row = new VisualElement();
             row.style.flexDirection = FlexDirection.Row;
-            row.style.height = 4f;
+            row.style.height = cellSize;
+            row.style.flexGrow = 0f;
+            row.style.flexShrink = 0f;
 
             for (int columnIndex = 0; columnIndex < rowText.Length; columnIndex++)
             {
                 VisualElement cell = new VisualElement();
-                cell.style.width = 4f;
-                cell.style.height = 4f;
+                cell.style.width = cellSize;
+                cell.style.height = cellSize;
+                cell.style.flexGrow = 0f;
+                cell.style.flexShrink = 0f;
                 cell.style.backgroundColor = rowText[columnIndex] == '1' ? Color.black : Color.white;
                 row.Add(cell);
             }
@@ -1800,7 +1942,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         headerRow.Add(closeButton);
         settingsPanel.Add(headerRow);
 
-        Label version = CreatePanelLabel("Version 1.4.5.14");
+        Label version = CreatePanelLabel("Version 1.4.6.13");
         version.style.color = new Color(1f, 1f, 1f, 0.65f);
         settingsPanel.Add(version);
 
@@ -1922,6 +2064,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
     private void HideAllPopupPanels()
     {
+        CancelMultiSelectForNavigation();
         searchPanelIsVisible = false;
         queuePanelIsVisible = false;
         companionPanelIsVisible = false;
@@ -1979,6 +2122,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         UpdateSettingsPanelLayout();
         UpdateSettingsPanel();
         ApplyThemeToVisibleElements();
+        UpdateCompanionHub(true);
         settingsPanel.Focus();
     }
 
@@ -2014,6 +2158,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         displaySection.Add(CreateSettingsToggle("Album Art in Search", () => modSettings.ShowAlbumArtInSearch, value => { modSettings.ShowAlbumArtInSearch = value; if (searchPanelIsVisible) { UpdateSearchResults(searchTextField != null ? searchTextField.value : ""); } }));
         displaySection.Add(CreateSettingsToggle("Album Art in Queue", () => modSettings.ShowAlbumArtInQueue, value => { modSettings.ShowAlbumArtInQueue = value; if (queuePanelIsVisible) { UpdateQueuePanel(); } }));
         displaySection.Add(CreateSettingsToggle("Album Art in History", () => modSettings.ShowAlbumArtInHistory, value => { modSettings.ShowAlbumArtInHistory = value; if (historyPanelIsVisible) { UpdateHistoryPanel(); } }));
+        displaySection.Add(CreateSettingsToggle("Album Art in Playlists", () => modSettings.ShowAlbumArtInPlaylists, value => { modSettings.ShowAlbumArtInPlaylists = value; if (searchPanelIsVisible && showOnlyPlaylistSearchResults) { UpdateSearchResults(searchTextField != null ? searchTextField.value : ""); } }));
         displaySection.Add(CreateSettingsToggle("Player/Mics in Now Playing Queue", () => modSettings.ShowNowPlayingQueuePlayerMics, value => modSettings.ShowNowPlayingQueuePlayerMics = value));
         displaySection.Add(CreateSettingsToggle("Show Favorite Stars", () => modSettings.ShowFavoriteStars, value => { modSettings.ShowFavoriteStars = value; RefreshFavoriteViews(); }));
         displaySection.Add(CreateSettingsToggle("Favorite Star Animation", () => modSettings.ShowFavoriteSparkleAnimation, value => modSettings.ShowFavoriteSparkleAnimation = value));
@@ -2030,16 +2175,64 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         AddSettingsCategory(overlaySection);
 
         VisualElement companionSection = CreateSettingsCategory("Companion", "Install and use the Melody Mania Companion App.");
-        Label companionInfo = CreatePanelLabel("Open Queue and use Companion App to show the install QR code.");
+
+        VisualElement companionQrRow = new VisualElement();
+        companionQrRow.style.flexDirection = FlexDirection.Row;
+        companionQrRow.style.alignItems = Align.Center;
+        companionQrRow.style.marginTop = 6;
+        companionQrRow.style.marginBottom = 6;
+
+        VisualElement companionQr = CreateSmallCompanionAppQrCodeElement();
+        companionQr.style.marginRight = 12;
+        companionQrRow.Add(companionQr);
+
+        VisualElement companionTextColumn = new VisualElement();
+        companionTextColumn.style.flexDirection = FlexDirection.Column;
+        companionTextColumn.style.flexGrow = 1f;
+        companionTextColumn.style.flexShrink = 1f;
+
+        List<string> settingsCompanionDevices = GetConnectedCompanionDeviceNames();
+        int settingsCompanionDeviceCount = settingsCompanionDevices != null ? settingsCompanionDevices.Count : 0;
+
+        Label companionInfo = CreatePanelLabel("Scan the QR code to install the Melody Mania Companion App.");
         companionInfo.style.whiteSpace = WhiteSpace.Normal;
-        companionInfo.style.color = new Color(1f, 1f, 1f, 0.72f);
-        companionInfo.style.marginTop = 4;
-        companionInfo.style.marginBottom = 4;
-        companionSection.Add(companionInfo);
+        companionInfo.style.color = new Color(1f, 1f, 1f, 0.78f);
+        companionInfo.style.marginTop = 0f;
+        companionInfo.style.marginBottom = 4f;
+        companionTextColumn.Add(companionInfo);
+
+        VisualElement settingsCompanionStatusRow = new VisualElement();
+        settingsCompanionStatusRow.style.flexDirection = FlexDirection.Row;
+        settingsCompanionStatusRow.style.alignItems = Align.Center;
+        settingsCompanionStatusRow.style.marginTop = 0f;
+        settingsCompanionStatusRow.style.marginBottom = 3f;
+
+        settingsCompanionStatusIcon = null;
+
+        settingsCompanionStatusLabel = CreateCompanionStatusLabel(settingsCompanionDeviceCount);
+        settingsCompanionStatusRow.Add(settingsCompanionStatusLabel);
+        companionTextColumn.Add(settingsCompanionStatusRow);
+
+        settingsCompanionDeviceCountLabel = CreatePanelLabel(settingsCompanionDeviceCount == 0 ? "0 devices connected" : settingsCompanionDeviceCount + (settingsCompanionDeviceCount == 1 ? " device connected" : " devices connected"));
+        settingsCompanionDeviceCountLabel.style.whiteSpace = WhiteSpace.Normal;
+        settingsCompanionDeviceCountLabel.style.color = new Color(1f, 1f, 1f, 0.68f);
+        settingsCompanionDeviceCountLabel.style.marginTop = 0f;
+        settingsCompanionDeviceCountLabel.style.marginBottom = 4f;
+        companionTextColumn.Add(settingsCompanionDeviceCountLabel);
+
+        Label companionHint = CreatePanelLabel("The full Companion dashboard is still available from Queue.");
+        companionHint.style.whiteSpace = WhiteSpace.Normal;
+        companionHint.style.color = new Color(1f, 1f, 1f, 0.58f);
+        companionHint.style.marginTop = 0f;
+        companionHint.style.marginBottom = 0f;
+        companionTextColumn.Add(companionHint);
+
+        companionQrRow.Add(companionTextColumn);
+        companionSection.Add(companionQrRow);
         AddSettingsCategory(companionSection);
 
         VisualElement aboutSection = CreateSettingsCategory("About", "Version and mod information.");
-        Label versionInfo = CreatePanelLabel("BetterJukebox 1.4.5.14");
+        Label versionInfo = CreatePanelLabel("BetterJukebox 1.4.6.14");
         versionInfo.style.color = GetAccentHoverColor();
         aboutSection.Add(versionInfo);
         Label disableInfo = CreatePanelLabel("To fully disable BetterJukebox, open Melody Mania > Mods and disable the mod there. This avoids two different enable states.");
@@ -2230,12 +2423,12 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
     private string GetUiThemeLabel()
     {
-        return IsDiscoPurpleTheme() ? "DiscoPurple" : "Standard";
+        return GetUiThemeName();
     }
 
     private void CycleUiTheme()
     {
-        modSettings.UiTheme = IsDiscoPurpleTheme() ? 0 : 1;
+        modSettings.UiTheme = (GetUiThemeIndex() + 1) % 6;
         forceButtonThemeRefreshOnNextSettingsUpdate = true;
         ApplyThemeToVisibleElements();
         ApplyButtonTreeTheme(actionOverlay);
@@ -2246,9 +2439,55 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         });
     }
 
+    private int GetUiThemeIndex()
+    {
+        if (modSettings == null)
+        {
+            return 1;
+        }
+
+        int theme = modSettings.UiTheme;
+        if (theme < 0 || theme > 5)
+        {
+            return 1;
+        }
+        return theme;
+    }
+
+    private string GetUiThemeName()
+    {
+        int theme = GetUiThemeIndex();
+        if (theme == 0)
+        {
+            return "DiscoGrey";
+        }
+        if (theme == 2)
+        {
+            return "DiscoGreen";
+        }
+        if (theme == 3)
+        {
+            return "DiscoBlue";
+        }
+        if (theme == 4)
+        {
+            return "DiscoRed";
+        }
+        if (theme == 5)
+        {
+            return "DiscoGold";
+        }
+        return "DiscoPurple";
+    }
+
     private bool IsDiscoPurpleTheme()
     {
-        return modSettings == null || modSettings.UiTheme != 0;
+        return GetUiThemeIndex() == 1;
+    }
+
+    private bool IsDiscoGreyTheme()
+    {
+        return GetUiThemeIndex() == 0;
     }
 
     private float GetOverlayFadeDuration()
@@ -2333,11 +2572,14 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
 
         ProcessKeyboardShortcuts();
+        ProcessMultiSelectLongPress();
         ProcessPlaylistNameDialogKeyboardInput();
         ProcessPopupEscapeInput();
         UpdatePopupWheelVolumeGuard();
         ProcessSettingsKeyboardInput();
         ProcessSearchKeyboardInput();
+        ProcessQueueHoldMoveProgress();
+        ProcessPlaylistHoldMoveProgress();
         UpdateSkipSong();
         SuppressBuiltInMousePause();
         HideBuiltInPauseButton();
@@ -2345,6 +2587,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         UpdateActionOverlay();
         UpdateQueueBadge(false);
         UpdateCompanionHub(false);
+        UpdateSettingsCompanionStatus();
         UpdateProgressBar();
         UpdateUiElementsFadeOut();
         UpdateFinishingScene();
@@ -3221,6 +3464,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         UpdatePopupPanelLayout(searchPanel);
         UpdateFavoriteFilterButtonText();
         UpdateFavoriteActionRowVisibility();
+        UpdateMultiSelectActionRowVisibility();
         UpdateSearchResults(searchTextField != null ? searchTextField.value : "");
         ApplyThemeToVisibleElements();
         lastSearchFocusTime = Time.unscaledTime;
@@ -3376,6 +3620,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         string signature = string.Join("|", connectedDevices.ToArray());
         if (!force && signature == lastCompanionHubSignature)
         {
+            ApplyCompanionStatusStyles();
             return;
         }
         lastCompanionHubSignature = signature;
@@ -3383,10 +3628,8 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         int count = connectedDevices.Count;
         if (companionStatusLabel != null)
         {
-            companionStatusLabel.text = count > 0
-                ? "🟢 Connected"
-                : "🟡 Waiting for devices...";
-            companionStatusLabel.style.color = count > 0 ? new Color(0.7f, 1f, 0.75f, 1f) : new Color(1f, 0.86f, 0.45f, 1f);
+            companionStatusLabel.text = GetCompanionStatusText(count);
+            ApplyCompanionStatusLabelStyle(companionStatusLabel, count);
         }
         if (companionVersionLabel != null)
         {
@@ -3397,6 +3640,19 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         if (companionDeviceCountLabel != null)
         {
             companionDeviceCountLabel.text = count == 0
+                ? "0 devices connected"
+                : count + (count == 1 ? " device connected" : " devices connected");
+        }
+
+        if (settingsCompanionStatusLabel != null)
+        {
+            settingsCompanionStatusLabel.text = GetCompanionStatusText(count);
+            ApplyCompanionStatusLabelStyle(settingsCompanionStatusLabel, count);
+        }
+
+        if (settingsCompanionDeviceCountLabel != null)
+        {
+            settingsCompanionDeviceCountLabel.text = count == 0
                 ? "0 devices connected"
                 : count + (count == 1 ? " device connected" : " devices connected");
         }
@@ -3417,6 +3673,104 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
                     companionDeviceListContainer.Add(CreateCompanionDeviceRow(connectedDevices[i]));
                 }
             }
+        }
+    }
+
+    private void UpdateSettingsCompanionStatus()
+    {
+        if (!settingsPanelIsVisible && settingsCompanionStatusLabel == null && settingsCompanionDeviceCountLabel == null)
+        {
+            return;
+        }
+
+        List<string> connectedDevices = GetConnectedCompanionDeviceNames();
+        int count = connectedDevices != null ? connectedDevices.Count : 0;
+
+        if (settingsCompanionStatusLabel != null)
+        {
+            settingsCompanionStatusLabel.text = GetCompanionStatusText(count);
+            ApplyCompanionStatusLabelStyle(settingsCompanionStatusLabel, count);
+        }
+
+        if (settingsCompanionDeviceCountLabel != null)
+        {
+            settingsCompanionDeviceCountLabel.text = count == 0
+                ? "0 devices connected"
+                : count + (count == 1 ? " device connected" : " devices connected");
+        }
+    }
+
+    private Label CreateCompanionStatusLabel(int connectedDeviceCount)
+    {
+        Label label = CreatePanelLabel(GetCompanionStatusText(connectedDeviceCount));
+        ApplyCompanionStatusLabelStyle(label, connectedDeviceCount);
+        label.RegisterCallback<AttachToPanelEvent>(evt =>
+        {
+            List<string> connectedDevices = GetConnectedCompanionDeviceNames();
+            int count = connectedDevices != null ? connectedDevices.Count : 0;
+            label.text = GetCompanionStatusText(count);
+            ApplyCompanionStatusLabelStyle(label, count);
+        });
+        label.RegisterCallback<GeometryChangedEvent>(evt =>
+        {
+            List<string> connectedDevices = GetConnectedCompanionDeviceNames();
+            int count = connectedDevices != null ? connectedDevices.Count : 0;
+            label.text = GetCompanionStatusText(count);
+            ApplyCompanionStatusLabelStyle(label, count);
+        });
+        return label;
+    }
+
+    private string GetCompanionStatusText(int connectedDeviceCount)
+    {
+        return connectedDeviceCount > 0
+            ? "🟢 Connected"
+            : "🟡 Waiting for devices...";
+    }
+
+    private string GetCompanionStatusTextWithoutIcon(int connectedDeviceCount)
+    {
+        return connectedDeviceCount > 0
+            ? "Connected"
+            : "Waiting for devices...";
+    }
+
+    private Color GetCompanionStatusColor(int connectedDeviceCount)
+    {
+        return connectedDeviceCount > 0
+            ? new Color(0.7f, 1f, 0.75f, 1f)
+            : new Color(1f, 0.86f, 0.45f, 1f);
+    }
+
+    private void ApplyCompanionStatusLabelStyle(Label label, int connectedDeviceCount)
+    {
+        if (label == null)
+        {
+            return;
+        }
+
+        label.style.whiteSpace = WhiteSpace.Normal;
+        label.style.color = GetCompanionStatusColor(connectedDeviceCount);
+        label.style.opacity = 1f;
+        label.style.marginTop = 0f;
+        label.style.marginBottom = 0f;
+    }
+
+    private void ApplyCompanionStatusStyles()
+    {
+        List<string> connectedDevices = GetConnectedCompanionDeviceNames();
+        int count = connectedDevices != null ? connectedDevices.Count : 0;
+
+        if (companionStatusLabel != null)
+        {
+            companionStatusLabel.text = GetCompanionStatusText(count);
+            ApplyCompanionStatusLabelStyle(companionStatusLabel, count);
+        }
+
+        if (settingsCompanionStatusLabel != null)
+        {
+            settingsCompanionStatusLabel.text = GetCompanionStatusText(count);
+            ApplyCompanionStatusLabelStyle(settingsCompanionStatusLabel, count);
         }
     }
 
@@ -3603,6 +3957,11 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
     private void UpdateSearchResults(string searchText)
     {
+        searchRenderGeneration++;
+        pendingSearchRenderMatches.Clear();
+        pendingSearchRenderSection = null;
+        pendingSearchRenderIndex = 0;
+
         if (searchResultsContainer == null)
         {
             return;
@@ -3618,7 +3977,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         string trimmedSearchText = searchText == null ? "" : searchText.Trim();
         if (!showOnlyFavoriteSearchResults && !showOnlyHistorySearchResults && trimmedSearchText.Length < 2)
         {
-            searchResultsContainer.Add(CreateEmptyState("⌕", "Search songs", "Type at least 2 characters."));
+            searchResultsContainer.Add(CreateEmptyState("🔍", "Search songs", "Type at least 2 characters."));
             return;
         }
 
@@ -3633,9 +3992,8 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         {
             matches = matches.OrderBy(songMeta => songMeta != null ? songMeta.GetArtistDashTitle() : "").ToList();
         }
-        matches = matches.Take(50).ToList();
 
-        if (matches.IsNullOrEmpty())
+        if (matches.Count == 0)
         {
             string emptyTitle = showOnlyFavoriteSearchResults ? "No favorites found" : (showOnlyHistorySearchResults ? "No history found" : "No matches");
             string emptyBody = showOnlyFavoriteSearchResults ? "Mark songs with ★ to add them here." : (showOnlyHistorySearchResults ? "Played songs will show up here." : "Try another artist or song title.");
@@ -3644,12 +4002,57 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
 
         string sectionTitle = showOnlyFavoriteSearchResults ? "Favorite Songs" : (showOnlyHistorySearchResults ? "History" : "Results");
-        VisualElement resultsSection = CreatePremiumPanelSection(sectionTitle, matches.Count + (matches.Count == 1 ? " song found" : " songs found"));
-        foreach (SongMeta songMeta in matches)
+        StartProgressiveSearchRender(sectionTitle, matches, false, null);
+    }
+
+    private void StartProgressiveSearchRender(string sectionTitle, List<SongMeta> matches, bool playlistRows, BetterJukeboxPlaylist playlist)
+    {
+        searchRenderGeneration++;
+        int generation = searchRenderGeneration;
+
+        pendingSearchRenderMatches = matches != null ? matches : new List<SongMeta>();
+        pendingSearchRenderIndex = 0;
+        string subtitle = pendingSearchRenderMatches.Count + (pendingSearchRenderMatches.Count == 1 ? " song" : " songs");
+        if (!playlistRows)
         {
-            resultsSection.Add(CreateSearchResultRow(songMeta));
+            subtitle += " found";
         }
-        searchResultsContainer.Add(resultsSection);
+
+        pendingSearchRenderSection = CreatePremiumPanelSection(sectionTitle, subtitle);
+        if (searchResultsContainer != null)
+        {
+            searchResultsContainer.Add(pendingSearchRenderSection);
+        }
+
+        RenderNextSearchBatch(generation, playlistRows, playlist);
+    }
+
+    private void RenderNextSearchBatch(int generation, bool playlistRows, BetterJukeboxPlaylist playlist)
+    {
+        if (generation != searchRenderGeneration || pendingSearchRenderSection == null || pendingSearchRenderMatches == null)
+        {
+            return;
+        }
+
+        int endIndex = Math.Min(pendingSearchRenderIndex + SearchRenderBatchSize, pendingSearchRenderMatches.Count);
+        for (int i = pendingSearchRenderIndex; i < endIndex; i++)
+        {
+            SongMeta songMeta = pendingSearchRenderMatches[i];
+            if (playlistRows)
+            {
+                pendingSearchRenderSection.Add(CreatePlaylistSongRow(songMeta, playlist));
+            }
+            else
+            {
+                pendingSearchRenderSection.Add(CreateSearchResultRow(songMeta));
+            }
+        }
+        pendingSearchRenderIndex = endIndex;
+
+        if (pendingSearchRenderIndex < pendingSearchRenderMatches.Count)
+        {
+            AwaitableUtils.ExecuteAfterDelayInFramesAsync(1, () => RenderNextSearchBatch(generation, playlistRows, playlist));
+        }
     }
 
     private void QueueFavoriteSongs()
@@ -4089,15 +4492,479 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
     private bool MatchesSearch(SongMeta songMeta, string query)
     {
-        string artist = songMeta?.Artist ?? "";
-        string title = songMeta?.Title ?? "";
-        string combined = (artist + " " + title).ToLowerInvariant();
-        return combined.Contains(query);
+        return MatchesSmartSearch(songMeta, query);
+    }
+
+    private bool MatchesSmartSearch(SongMeta songMeta, string query)
+    {
+        if (songMeta == null)
+        {
+            return false;
+        }
+
+        query = query == null ? "" : query.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return true;
+        }
+
+        string searchableText = GetSmartSearchText(songMeta);
+        string[] tokens = query.Split(new char[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        if (tokens == null || tokens.Length == 0)
+        {
+            return true;
+        }
+
+        for (int i = 0; i < tokens.Length; i++)
+        {
+            string token = NormalizeSmartSearchToken(tokens[i]);
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                continue;
+            }
+
+            if (IsSmartSearchNoiseWord(token))
+            {
+                continue;
+            }
+
+            string nextToken = i + 1 < tokens.Length ? NormalizeSmartSearchToken(tokens[i + 1]) : "";
+            if (!MatchesSmartSearchToken(songMeta, searchableText, token, nextToken))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool MatchesSmartSearchToken(SongMeta songMeta, string searchableText, string token, string nextToken)
+    {
+        if (songMeta == null)
+        {
+            return false;
+        }
+
+        if (token.StartsWith("year:"))
+        {
+            return MatchesSongYear(songMeta, token.Substring(5), false);
+        }
+
+        if (token.StartsWith("language:"))
+        {
+            return MatchesSongLanguage(songMeta, token.Substring(9));
+        }
+
+        if (token.StartsWith("lang:"))
+        {
+            return MatchesSongLanguage(songMeta, token.Substring(5));
+        }
+
+        if (token.StartsWith("genre:"))
+        {
+            return ContainsSmartText(GetSongMetaSmartValue(songMeta, new string[] { "Genre", "Genres" }), token.Substring(6));
+        }
+
+        if (token.StartsWith("edition:"))
+        {
+            return ContainsSmartText(GetSongMetaSmartValue(songMeta, new string[] { "Edition", "Editions" }), token.Substring(8));
+        }
+
+        if (token.StartsWith("playlist:"))
+        {
+            return IsSongInPlaylistName(songMeta, token.Substring(9));
+        }
+
+        if (token.StartsWith("has:"))
+        {
+            return MatchesHasFilter(songMeta, token.Substring(4));
+        }
+
+        if (token == "favorite" || token == "favorites" || token == "favourite" || token == "favourites")
+        {
+            return IsFavoriteSongMeta(songMeta);
+        }
+
+        if (IsLanguageSearchToken(token))
+        {
+            return MatchesSongLanguage(songMeta, token);
+        }
+
+        if (IsDecadeToken(token))
+        {
+            return MatchesSongDecade(songMeta, GetDecadeStart(token));
+        }
+
+        if (IsFourDigitYear(token))
+        {
+            if (nextToken == "songs" || nextToken == "song" || nextToken == "decade" || nextToken == "decades")
+            {
+                return MatchesSongDecade(songMeta, GetDecadeStart(token));
+            }
+            return MatchesSongYear(songMeta, token, false);
+        }
+
+        if (token == "video" || token == "cover" || token == "background")
+        {
+            return MatchesHasFilter(songMeta, token) || ContainsSmartText(searchableText, token);
+        }
+
+        return ContainsSmartText(searchableText, token);
+    }
+
+    private string GetSmartSearchText(SongMeta songMeta)
+    {
+        if (songMeta == null)
+        {
+            return "";
+        }
+
+        System.Text.StringBuilder builder = new System.Text.StringBuilder();
+        AppendSmartSearchText(builder, songMeta.Artist);
+        AppendSmartSearchText(builder, songMeta.Title);
+        AppendSmartSearchText(builder, GetSongMetaSmartValue(songMeta, new string[] { "Year", "ReleaseYear", "YearString" }));
+        AppendSmartSearchText(builder, GetSongMetaSmartValue(songMeta, new string[] { "Language", "Languages" }));
+        AppendSmartSearchText(builder, GetSongMetaSmartValue(songMeta, new string[] { "Genre", "Genres" }));
+        AppendSmartSearchText(builder, GetSongMetaSmartValue(songMeta, new string[] { "Edition", "Editions" }));
+        AppendSmartSearchText(builder, GetSongMetaSmartValue(songMeta, new string[] { "Tags", "Tag", "MedleyTags" }));
+        AppendSmartSearchText(builder, GetSongMetaSmartValue(songMeta, new string[] { "Bpm", "BPM", "BeatsPerMinute" }));
+        AppendSmartSearchText(builder, GetSongMetaSmartValue(songMeta, new string[] { "Video", "VideoFile", "VideoPath" }));
+        AppendSmartSearchText(builder, GetSongMetaSmartValue(songMeta, new string[] { "Background", "BackgroundFile", "BackgroundPath" }));
+        AppendSmartSearchText(builder, GetSongMetaSmartValue(songMeta, new string[] { "Cover", "CoverFile", "CoverPath" }));
+        return builder.ToString().ToLowerInvariant();
+    }
+
+    private void AppendSmartSearchText(System.Text.StringBuilder builder, string text)
+    {
+        if (builder == null || string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+        builder.Append(' ');
+        builder.Append(text);
+    }
+
+    private string GetSongMetaSmartValue(SongMeta songMeta, string[] memberNames)
+    {
+        if (songMeta == null || memberNames == null)
+        {
+            return "";
+        }
+
+        for (int i = 0; i < memberNames.Length; i++)
+        {
+            object value = GetMemberValue(songMeta, memberNames[i]);
+            string text = GetReadableSmartSearchValue(value);
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                return text;
+            }
+        }
+        return "";
+    }
+
+    private string GetReadableSmartSearchValue(object value)
+    {
+        if (value == null)
+        {
+            return "";
+        }
+
+        if (value is string)
+        {
+            return (string)value;
+        }
+
+        System.Collections.IEnumerable enumerable = value as System.Collections.IEnumerable;
+        if (enumerable != null && !(value is string))
+        {
+            List<string> parts = new List<string>();
+            foreach (object item in enumerable)
+            {
+                string itemText = GetReadableSmartSearchValue(item);
+                if (!string.IsNullOrWhiteSpace(itemText))
+                {
+                    parts.Add(itemText);
+                }
+            }
+            return string.Join(" ", parts.ToArray());
+        }
+
+        return value.ToString();
+    }
+
+    private string NormalizeSmartSearchToken(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return "";
+        }
+        return token.Trim().Trim(',', '.', ';', '!', '?', '(', ')', '[', ']', '{', '}', '"', '\'').ToLowerInvariant();
+    }
+
+    private bool IsSmartSearchNoiseWord(string token)
+    {
+        return token == "="
+            || token == "songs"
+            || token == "song"
+            || token == "year"
+            || token == "years"
+            || token == "release"
+            || token == "released"
+            || token == "language"
+            || token == "lang"
+            || token == "genre"
+            || token == "edition";
+    }
+
+    private bool ContainsSmartText(string source, string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return true;
+        }
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            return false;
+        }
+        return source.ToLowerInvariant().Contains(token.ToLowerInvariant());
+    }
+
+    private bool IsFourDigitYear(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token) || token.Length != 4)
+        {
+            return false;
+        }
+        int value;
+        if (!int.TryParse(token, out value))
+        {
+            return false;
+        }
+        return value >= 1900 && value <= 2099;
+    }
+
+    private bool IsDecadeToken(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return false;
+        }
+
+        if (token.EndsWith("s") && token.Length == 5 && IsFourDigitYear(token.Substring(0, 4)))
+        {
+            return true;
+        }
+
+        if (token.EndsWith("s") && token.Length == 3)
+        {
+            int value;
+            if (int.TryParse(token.Substring(0, 2), out value))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private int GetDecadeStart(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return -1;
+        }
+
+        if (token.EndsWith("s"))
+        {
+            token = token.Substring(0, token.Length - 1);
+        }
+
+        int value;
+        if (!int.TryParse(token, out value))
+        {
+            return -1;
+        }
+
+        if (value < 100)
+        {
+            if (value <= 30)
+            {
+                value += 2000;
+            }
+            else
+            {
+                value += 1900;
+            }
+        }
+
+        return (value / 10) * 10;
+    }
+
+    private bool MatchesSongYear(SongMeta songMeta, string yearText, bool allowDecade)
+    {
+        int targetYear;
+        if (!int.TryParse(yearText, out targetYear))
+        {
+            return false;
+        }
+
+        int songYear = GetSongYear(songMeta);
+        if (songYear <= 0)
+        {
+            return false;
+        }
+
+        if (allowDecade)
+        {
+            int decade = (targetYear / 10) * 10;
+            return songYear >= decade && songYear <= decade + 9;
+        }
+        return songYear == targetYear;
+    }
+
+    private bool MatchesSongDecade(SongMeta songMeta, int decadeStart)
+    {
+        if (decadeStart <= 0)
+        {
+            return false;
+        }
+        int songYear = GetSongYear(songMeta);
+        return songYear >= decadeStart && songYear <= decadeStart + 9;
+    }
+
+    private int GetSongYear(SongMeta songMeta)
+    {
+        string text = GetSongMetaSmartValue(songMeta, new string[] { "Year", "ReleaseYear", "YearString" });
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return -1;
+        }
+
+        for (int i = 0; i <= text.Length - 4; i++)
+        {
+            string part = text.Substring(i, 4);
+            int year;
+            if (int.TryParse(part, out year) && year >= 1900 && year <= 2099)
+            {
+                return year;
+            }
+        }
+        return -1;
+    }
+
+    private bool IsLanguageSearchToken(string token)
+    {
+        string canonical = GetCanonicalLanguageToken(token);
+        return !string.IsNullOrWhiteSpace(canonical);
+    }
+
+    private bool MatchesSongLanguage(SongMeta songMeta, string token)
+    {
+        string language = GetSongMetaSmartValue(songMeta, new string[] { "Language", "Languages" }).ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(language))
+        {
+            return false;
+        }
+
+        string canonical = GetCanonicalLanguageToken(token);
+        if (string.IsNullOrWhiteSpace(canonical))
+        {
+            canonical = token;
+        }
+
+        if (language.Contains(canonical) || language.Contains(token))
+        {
+            return true;
+        }
+
+        if (canonical == "swedish") { return language.Contains("svenska") || language.Contains("sverige"); }
+        if (canonical == "english") { return language.Contains("engelska") || language.Contains("eng"); }
+        if (canonical == "finnish") { return language.Contains("finska") || language.Contains("suomi") || language.Contains("finland"); }
+        if (canonical == "norwegian") { return language.Contains("norska") || language.Contains("norge"); }
+        if (canonical == "danish") { return language.Contains("danska") || language.Contains("danmark"); }
+        if (canonical == "german") { return language.Contains("tyska") || language.Contains("deutsch"); }
+        if (canonical == "spanish") { return language.Contains("spanska") || language.Contains("espanol") || language.Contains("español"); }
+        if (canonical == "french") { return language.Contains("franska") || language.Contains("francais") || language.Contains("français"); }
+        if (canonical == "italian") { return language.Contains("italienska"); }
+        return false;
+    }
+
+    private string GetCanonicalLanguageToken(string token)
+    {
+        token = NormalizeSmartSearchToken(token);
+        if (token == "swedish" || token == "svedish" || token == "svenska" || token == "sverige") { return "swedish"; }
+        if (token == "english" || token == "engelska" || token == "eng") { return "english"; }
+        if (token == "finnish" || token == "finska" || token == "suomi" || token == "finland") { return "finnish"; }
+        if (token == "norwegian" || token == "norska" || token == "norge") { return "norwegian"; }
+        if (token == "danish" || token == "danska" || token == "danmark") { return "danish"; }
+        if (token == "german" || token == "tyska" || token == "deutsch") { return "german"; }
+        if (token == "spanish" || token == "spanska" || token == "espanol" || token == "español") { return "spanish"; }
+        if (token == "french" || token == "franska" || token == "francais" || token == "français") { return "french"; }
+        if (token == "italian" || token == "italienska") { return "italian"; }
+        return "";
+    }
+
+    private bool MatchesHasFilter(SongMeta songMeta, string token)
+    {
+        token = NormalizeSmartSearchToken(token);
+        if (token == "video")
+        {
+            return !string.IsNullOrWhiteSpace(GetSongMetaSmartValue(songMeta, new string[] { "Video", "VideoFile", "VideoPath" }));
+        }
+        if (token == "cover" || token == "albumart" || token == "art")
+        {
+            return !string.IsNullOrWhiteSpace(GetSongMetaSmartValue(songMeta, new string[] { "Cover", "CoverFile", "CoverPath" }));
+        }
+        if (token == "background" || token == "bg")
+        {
+            return !string.IsNullOrWhiteSpace(GetSongMetaSmartValue(songMeta, new string[] { "Background", "BackgroundFile", "BackgroundPath" }));
+        }
+        return false;
+    }
+
+    private bool IsSongInPlaylistName(SongMeta songMeta, string playlistNameQuery)
+    {
+        if (songMeta == null || string.IsNullOrWhiteSpace(playlistNameQuery))
+        {
+            return false;
+        }
+
+        LoadPlaylists();
+        List<string> ids = GetFavoriteSongMetaIds(songMeta);
+        string normalizedPlaylistQuery = playlistNameQuery.ToLowerInvariant();
+        for (int i = 0; i < betterJukeboxPlaylists.Count; i++)
+        {
+            BetterJukeboxPlaylist playlist = betterJukeboxPlaylists[i];
+            if (playlist == null || string.IsNullOrWhiteSpace(playlist.Name))
+            {
+                continue;
+            }
+
+            if (!playlist.Name.ToLowerInvariant().Contains(normalizedPlaylistQuery))
+            {
+                continue;
+            }
+
+            for (int idIndex = 0; idIndex < ids.Count; idIndex++)
+            {
+                if (playlist.SongIds.Contains(ids[idIndex]))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private VisualElement CreateSearchResultRow(SongMeta songMeta)
     {
         VisualElement row = CreatePanelRow();
+        ConfigureSongRowForMultiSelect(row, songMeta);
+
+        if (multiSelectMode)
+        {
+            row.Add(CreateMultiSelectCheckmark(songMeta));
+        }
 
         if (modSettings.ShowAlbumArtInSearch)
         {
@@ -4122,21 +4989,510 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
         row.Add(textColumn);
 
-        Button playNowButton = CreateSmallPanelButton("Play now", () => PlaySongNow(songMeta));
-        Button queueButton = null;
-        queueButton = CreateSmallPanelButton("Queue", () =>
+        if (!multiSelectMode)
+        {
+            Button playNowButton = CreateSmallPanelButton("Play now", () => PlaySongNow(songMeta));
+            Button queueButton = null;
+            queueButton = CreateSmallPanelButton("Queue", () =>
+            {
+                if (AddSongToQueue(songMeta, false))
+                {
+                    ShowQueueAddedButtonFeedback(queueButton);
+                }
+            });
+
+            row.Add(playNowButton);
+            row.Add(queueButton);
+            row.Add(CreateSmallPanelButton("🎵", () => ShowAddToPlaylistDialog(songMeta)));
+            row.Add(CreateFavoriteStarButton(songMeta, () => UpdateSearchResults(searchTextField != null ? searchTextField.value : "")));
+        }
+        return row;
+    }
+
+
+    private void ToggleMultiSelectMode()
+    {
+        if (multiSelectMode)
+        {
+            ClearMultiSelectSelection(true);
+        }
+        else
+        {
+            EnterMultiSelectMode(null);
+        }
+    }
+
+    private void EnterMultiSelectMode(SongMeta firstSong)
+    {
+        multiSelectMode = true;
+        if (firstSong != null)
+        {
+            SetSongMultiSelected(firstSong, true);
+        }
+        UpdateMultiSelectActionRowVisibility();
+        UpdateSearchResults(searchTextField != null ? searchTextField.value : "");
+    }
+
+    private void ClearMultiSelectSelection(bool exitMode)
+    {
+        multiSelectedSongsById.Clear();
+        multiSelectedSongIdOrder.Clear();
+        if (exitMode)
+        {
+            multiSelectMode = false;
+        }
+        pendingMultiSelectLongPressSong = null;
+        pendingMultiSelectLongPressRow = null;
+        pendingMultiSelectLongPressTriggered = false;
+        UpdateMultiSelectActionRowVisibility();
+        UpdateSearchResults(searchTextField != null ? searchTextField.value : "");
+    }
+
+    private void CancelMultiSelectForNavigation()
+    {
+        if (!multiSelectMode && multiSelectedSongIdOrder.Count == 0)
+        {
+            return;
+        }
+
+        multiSelectedSongsById.Clear();
+        multiSelectedSongIdOrder.Clear();
+        multiSelectMode = false;
+        pendingMultiSelectLongPressSong = null;
+        pendingMultiSelectLongPressRow = null;
+        pendingMultiSelectLongPressTriggered = false;
+        UpdateMultiSelectActionRowVisibility();
+    }
+
+    private void ConfigureSongRowForMultiSelect(VisualElement row, SongMeta songMeta)
+    {
+        if (row == null || songMeta == null)
+        {
+            return;
+        }
+
+        if (IsSongMultiSelected(songMeta))
+        {
+            ApplyMultiSelectSelectedRowStyle(row);
+        }
+
+        row.RegisterCallback<PointerDownEvent>(evt =>
+        {
+            if (evt.button != 0 || IsInsideButton(evt.target as VisualElement))
+            {
+                return;
+            }
+            pendingMultiSelectLongPressSong = songMeta;
+            pendingMultiSelectLongPressRow = row;
+            pendingMultiSelectLongPressStartedAt = Time.unscaledTime;
+            pendingMultiSelectLongPressTriggered = false;
+        }, TrickleDown.NoTrickleDown);
+
+        row.RegisterCallback<PointerUpEvent>(evt =>
+        {
+            if (evt.button != 0 || IsInsideButton(evt.target as VisualElement))
+            {
+                ClearPendingMultiSelectLongPress();
+                return;
+            }
+
+            if (multiSelectMode && !pendingMultiSelectLongPressTriggered)
+            {
+                ToggleSongMultiSelected(songMeta);
+                evt.StopPropagation();
+            }
+            ClearPendingMultiSelectLongPress();
+        }, TrickleDown.NoTrickleDown);
+
+        row.RegisterCallback<PointerLeaveEvent>(evt =>
+        {
+            if (pendingMultiSelectLongPressRow == row && !pendingMultiSelectLongPressTriggered)
+            {
+                ClearPendingMultiSelectLongPress();
+            }
+        });
+    }
+
+    private void ProcessMultiSelectLongPress()
+    {
+        if (pendingMultiSelectLongPressSong == null || pendingMultiSelectLongPressTriggered)
+        {
+            return;
+        }
+        if (Time.unscaledTime - pendingMultiSelectLongPressStartedAt < MultiSelectLongPressSeconds)
+        {
+            return;
+        }
+
+        pendingMultiSelectLongPressTriggered = true;
+        if (!multiSelectMode)
+        {
+            EnterMultiSelectMode(pendingMultiSelectLongPressSong);
+        }
+        else
+        {
+            SetSongMultiSelected(pendingMultiSelectLongPressSong, true);
+            UpdateMultiSelectActionRowVisibility();
+            UpdateSearchResults(searchTextField != null ? searchTextField.value : "");
+        }
+    }
+
+    private void ClearPendingMultiSelectLongPress()
+    {
+        pendingMultiSelectLongPressSong = null;
+        pendingMultiSelectLongPressRow = null;
+        pendingMultiSelectLongPressTriggered = false;
+    }
+
+    private void ToggleSongMultiSelected(SongMeta songMeta)
+    {
+        bool selected = IsSongMultiSelected(songMeta);
+        SetSongMultiSelected(songMeta, !selected);
+        if (multiSelectMode && multiSelectedSongIdOrder.Count == 0)
+        {
+            multiSelectMode = false;
+        }
+        UpdateMultiSelectActionRowVisibility();
+        UpdateSearchResults(searchTextField != null ? searchTextField.value : "");
+    }
+
+    private void SetSongMultiSelected(SongMeta songMeta, bool selected)
+    {
+        if (songMeta == null)
+        {
+            return;
+        }
+        string id = GetFavoriteSongMetaId(songMeta);
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return;
+        }
+        if (selected)
+        {
+            if (!multiSelectedSongsById.ContainsKey(id))
+            {
+                multiSelectedSongsById.Add(id, songMeta);
+                multiSelectedSongIdOrder.Add(id);
+            }
+            else
+            {
+                multiSelectedSongsById[id] = songMeta;
+            }
+        }
+        else
+        {
+            multiSelectedSongsById.Remove(id);
+            multiSelectedSongIdOrder.Remove(id);
+        }
+    }
+
+    private bool IsSongMultiSelected(SongMeta songMeta)
+    {
+        if (songMeta == null)
+        {
+            return false;
+        }
+        string id = GetFavoriteSongMetaId(songMeta);
+        return !string.IsNullOrWhiteSpace(id) && multiSelectedSongsById.ContainsKey(id);
+    }
+
+    private List<SongMeta> GetMultiSelectedSongs()
+    {
+        List<SongMeta> result = new List<SongMeta>();
+        foreach (string id in multiSelectedSongIdOrder.ToArray())
+        {
+            SongMeta songMeta;
+            if (multiSelectedSongsById.TryGetValue(id, out songMeta) && songMeta != null)
+            {
+                result.Add(songMeta);
+            }
+        }
+        return result;
+    }
+
+    private Label CreateMultiSelectCheckmark(SongMeta songMeta)
+    {
+        Label label = CreatePanelLabel(IsSongMultiSelected(songMeta) ? "☑" : "☐");
+        label.style.fontSize = 22f;
+        label.style.minWidth = 32f;
+        label.style.marginRight = 8f;
+        label.style.color = IsSongMultiSelected(songMeta) ? GetAccentHoverColor() : new Color(1f, 1f, 1f, 0.72f);
+        return label;
+    }
+
+    private void ApplyMultiSelectSelectedRowStyle(VisualElement row)
+    {
+        if (row == null)
+        {
+            return;
+        }
+        row.style.backgroundColor = GetRowPulseColor();
+        row.style.borderTopWidth = 1f;
+        row.style.borderBottomWidth = 1f;
+        row.style.borderLeftWidth = 1f;
+        row.style.borderRightWidth = 1f;
+        row.style.borderTopColor = GetAccentColor();
+        row.style.borderBottomColor = GetAccentColor();
+        row.style.borderLeftColor = GetAccentColor();
+        row.style.borderRightColor = GetAccentColor();
+    }
+
+    private void UpdateMultiSelectActionRowVisibility()
+    {
+        if (multiSelectActionRow == null)
+        {
+            return;
+        }
+        multiSelectActionRow.Clear();
+        if (!multiSelectMode)
+        {
+            multiSelectActionRow.style.display = DisplayStyle.None;
+            if (searchSelectModeButton != null)
+            {
+                SetButtonVisualText(searchSelectModeButton, "Select");
+            }
+            if (searchPlaylistsActionRow != null && showOnlyPlaylistSearchResults)
+            {
+                UpdatePlaylistActionRowVisibility();
+            }
+            return;
+        }
+
+        if (searchPlaylistsActionRow != null)
+        {
+            searchPlaylistsActionRow.style.display = DisplayStyle.None;
+        }
+        multiSelectActionRow.style.display = DisplayStyle.Flex;
+        int count = multiSelectedSongIdOrder.Count;
+        if (searchSelectModeButton != null)
+        {
+            SetButtonVisualText(searchSelectModeButton, "Done");
+        }
+
+        Label countLabel = CreatePanelLabel(count + (count == 1 ? " Selected" : " Selected"));
+        countLabel.style.color = GetAccentHoverColor();
+        countLabel.style.flexGrow = 1f;
+        multiSelectActionRow.Add(countLabel);
+        multiSelectActionRow.Add(CreateSmallPanelButton("Select All", SelectAllMultiSelectCurrentList));
+        multiSelectActionRow.Add(CreateSmallPanelButton("Queue", QueueMultiSelectedSongs));
+        multiSelectActionRow.Add(CreateSmallPanelButton("🎵", ShowAddMultiSelectedToPlaylistDialog));
+        multiSelectActionRow.Add(CreateSmallPanelButton("★", ToggleFavoriteMultiSelectedSongs));
+        multiSelectActionRow.Add(CreateSmallPanelButton("Clear", () => ClearMultiSelectSelection(true)));
+        multiSelectActionRow.Add(CreateSmallPanelButton("Done", () => ClearMultiSelectSelection(true)));
+    }
+
+
+
+    private List<SongMeta> GetCurrentMultiSelectSongList()
+    {
+        string searchText = searchTextField != null ? searchTextField.value : "";
+        string trimmedSearchText = searchText == null ? "" : searchText.Trim();
+        string query = trimmedSearchText.ToLowerInvariant();
+
+        if (showOnlyPlaylistSearchResults)
+        {
+            if (string.IsNullOrWhiteSpace(selectedPlaylistName))
+            {
+                return new List<SongMeta>();
+            }
+
+            BetterJukeboxPlaylist selected = FindPlaylist(selectedPlaylistName);
+            if (selected == null)
+            {
+                return new List<SongMeta>();
+            }
+
+            List<SongMeta> playlistSongs = GetPlaylistSongMetas(selected);
+            if (query.Length > 0)
+            {
+                playlistSongs = playlistSongs.Where(songMeta => MatchesSearch(songMeta, query)).ToList();
+            }
+            return playlistSongs;
+        }
+
+        if (!showOnlyFavoriteSearchResults && !showOnlyHistorySearchResults && trimmedSearchText.Length < 2)
+        {
+            return new List<SongMeta>();
+        }
+
+        List<SongMeta> sourceSongs = showOnlyHistorySearchResults
+            ? GetHistorySongMetasForSearch()
+            : (showOnlyFavoriteSearchResults ? GetFavoriteSongMetasForQueue() : GetAllSelectableSongMetas());
+
+        List<SongMeta> matches = sourceSongs
+            .Where(songMeta => (!showOnlyFavoriteSearchResults || IsFavoriteSongMeta(songMeta))
+                && (query.Length == 0 || MatchesSearch(songMeta, query)))
+            .ToList();
+
+        if (showOnlyFavoriteSearchResults && favoriteSortMode == 0)
+        {
+            matches = matches.OrderBy(songMeta => songMeta != null ? songMeta.GetArtistDashTitle() : "").ToList();
+        }
+
+        return matches;
+    }
+
+    private void SelectAllMultiSelectCurrentList()
+    {
+        List<SongMeta> songs = GetCurrentMultiSelectSongList();
+        if (songs.Count == 0)
+        {
+            return;
+        }
+
+        if (!multiSelectMode)
+        {
+            EnterMultiSelectMode(null);
+        }
+
+        foreach (SongMeta songMeta in songs)
+        {
+            SetSongMultiSelected(songMeta, true);
+        }
+
+        UpdateMultiSelectActionRowVisibility();
+        UpdateSearchResults(searchTextField != null ? searchTextField.value : "");
+    }
+
+
+    private void QueueMultiSelectedSongs()
+    {
+        List<SongMeta> songs = GetMultiSelectedSongs();
+        int addedCount = 0;
+        foreach (SongMeta songMeta in songs)
         {
             if (AddSongToQueue(songMeta, false))
             {
-                ShowQueueAddedButtonFeedback(queueButton);
+                addedCount++;
             }
-        });
+        }
+        if (addedCount > 0)
+        {
+            NotificationManager.CreateNotification(Translation.Of("Queued " + addedCount + (addedCount == 1 ? " song" : " songs")));
+            UpdateQueueBadge(true);
+            if (queuePanelIsVisible)
+            {
+                UpdateQueuePanel();
+            }
+        }
+    }
 
-        row.Add(playNowButton);
-        row.Add(queueButton);
-        row.Add(CreateSmallPanelButton("🎵", () => ShowAddToPlaylistDialog(songMeta)));
-        row.Add(CreateFavoriteStarButton(songMeta, () => UpdateSearchResults(searchTextField != null ? searchTextField.value : "")));
-        return row;
+    private void ToggleFavoriteMultiSelectedSongs()
+    {
+        List<SongMeta> songs = GetMultiSelectedSongs();
+        if (songs.Count == 0)
+        {
+            return;
+        }
+        bool allAreFavorites = true;
+        foreach (SongMeta songMeta in songs)
+        {
+            if (!IsFavoriteSongMeta(songMeta))
+            {
+                allAreFavorites = false;
+                break;
+            }
+        }
+        foreach (SongMeta songMeta in songs)
+        {
+            if (allAreFavorites == IsFavoriteSongMeta(songMeta))
+            {
+                ToggleFavoriteSongMeta(songMeta);
+            }
+        }
+        RefreshFavoriteViews();
+        UpdateMultiSelectActionRowVisibility();
+        UpdateSearchResults(searchTextField != null ? searchTextField.value : "");
+    }
+
+    private void ShowAddMultiSelectedToPlaylistDialog()
+    {
+        LoadPlaylists();
+        ClosePlaylistDialog();
+        List<SongMeta> selectedSongs = GetMultiSelectedSongs();
+        if (selectedSongs.Count == 0 || uiDocument == null || uiDocument.rootVisualElement == null)
+        {
+            return;
+        }
+
+        playlistDialogPanel = new VisualElement();
+        playlistDialogPanel.name = "betterJukeboxAddSelectedToPlaylistDialog";
+        playlistDialogPanel.style.position = Position.Absolute;
+        playlistDialogPanel.style.left = new StyleLength(new Length(35, LengthUnit.Percent));
+        playlistDialogPanel.style.right = new StyleLength(new Length(35, LengthUnit.Percent));
+        playlistDialogPanel.style.top = new StyleLength(new Length(28, LengthUnit.Percent));
+        playlistDialogPanel.style.flexDirection = FlexDirection.Column;
+        playlistDialogPanel.focusable = true;
+        playlistDialogPanel.style.paddingLeft = 16f;
+        playlistDialogPanel.style.paddingRight = 16f;
+        playlistDialogPanel.style.paddingTop = 14f;
+        playlistDialogPanel.style.paddingBottom = 14f;
+        playlistDialogPanel.style.backgroundColor = new Color(0f, 0f, 0f, 0.92f);
+        playlistDialogPanel.style.borderTopLeftRadius = 18f;
+        playlistDialogPanel.style.borderTopRightRadius = 18f;
+        playlistDialogPanel.style.borderBottomLeftRadius = 18f;
+        playlistDialogPanel.style.borderBottomRightRadius = 18f;
+        playlistDialogPanel.style.borderTopWidth = 1f;
+        playlistDialogPanel.style.borderBottomWidth = 1f;
+        playlistDialogPanel.style.borderLeftWidth = 1f;
+        playlistDialogPanel.style.borderRightWidth = 1f;
+        ApplyThemedBorder(playlistDialogPanel);
+        playlistDialogPanel.Add(CreatePopupHeader("Add Selected to Playlist", ClosePlaylistDialog));
+        if (betterJukeboxPlaylists.Count == 0)
+        {
+            playlistDialogPanel.Add(CreatePanelLabel("No playlists yet."));
+        }
+        foreach (BetterJukeboxPlaylist playlist in betterJukeboxPlaylists.OrderBy(it => it.Name).ToList())
+        {
+            BetterJukeboxPlaylist targetPlaylist = playlist;
+            Button playlistButton = null;
+            playlistButton = CreateSmallPanelButton("🎵 " + targetPlaylist.Name, () =>
+            {
+                int addedCount = AddSongsToPlaylist(targetPlaylist, selectedSongs);
+                SetButtonVisualText(playlistButton, addedCount + (addedCount == 1 ? " song added" : " songs added") + " to " + targetPlaylist.Name);
+                ApplyButtonPulseStyle(playlistButton);
+                AwaitableUtils.ExecuteAfterDelayInSecondsAsync(0.75f, () =>
+                {
+                    ClosePlaylistDialog();
+                    UpdatePlaylistFilterButtonText();
+                    UpdateSearchResults(searchTextField != null ? searchTextField.value : "");
+                });
+            });
+            playlistButton.style.marginTop = 5f;
+            playlistButton.style.marginBottom = 5f;
+            playlistDialogPanel.Add(playlistButton);
+        }
+        uiDocument.rootVisualElement.Add(playlistDialogPanel);
+        playlistDialogPanel.BringToFront();
+    }
+
+    private int AddSongsToPlaylist(BetterJukeboxPlaylist playlist, List<SongMeta> songs)
+    {
+        if (playlist == null || songs == null)
+        {
+            return 0;
+        }
+        int addedCount = 0;
+        for (int i = songs.Count - 1; i >= 0; i--)
+        {
+            SongMeta songMeta = songs[i];
+            if (songMeta == null)
+            {
+                continue;
+            }
+            string id = GetFavoriteSongMetaId(songMeta);
+            if (string.IsNullOrWhiteSpace(id) || playlist.SongIds.Contains(id))
+            {
+                continue;
+            }
+            playlist.SongIds.Insert(0, id);
+            addedCount++;
+        }
+        if (addedCount > 0)
+        {
+            SavePlaylists();
+        }
+        return addedCount;
     }
 
     private VisualElement CreateAlbumArtElement(SongMeta songMeta)
@@ -4394,8 +5750,8 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
                 row.Add(textColumn);
                 row.Add(CreateFavoriteStarButton(queueSongMetaForAlbumArt, () => UpdateQueuePanel()));
-                row.Add(CreateSmallPanelButton("↑", () => MoveRealQueueItem(index, -1)));
-                row.Add(CreateSmallPanelButton("↓", () => MoveRealQueueItem(index, 1)));
+                row.Add(CreateQueueMoveHoldButton("↑", "⇧", "⇈", index, -1, row));
+                row.Add(CreateQueueMoveHoldButton("↓", "⇩", "⇊", index, 1, row));
                 row.Add(CreateSmallPanelButton("❌", () => RemoveRealQueueItem(index)));
 
                 dragHandle.RegisterCallback<PointerDownEvent>(evt =>
@@ -5671,6 +7027,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
     {
         public string Name;
         public readonly List<string> SongIds = new List<string>();
+        public readonly List<string> AddedSongIds = new List<string>();
     }
 
     private string GetPlaylistsPath()
@@ -5737,6 +7094,32 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
                             playlist.SongIds.Add(id);
                         }
                     }
+
+                    int addedKey = text.IndexOf("\"added\"", arrayEnd, StringComparison.OrdinalIgnoreCase);
+                    int nextNameKey = text.IndexOf("\"name\"", arrayEnd, StringComparison.OrdinalIgnoreCase);
+                    if (addedKey >= 0 && (nextNameKey < 0 || addedKey < nextNameKey))
+                    {
+                        int addedArrayStart = text.IndexOf('[', addedKey);
+                        int addedArrayEnd = addedArrayStart >= 0 ? text.IndexOf(']', addedArrayStart) : -1;
+                        if (addedArrayStart >= 0 && addedArrayEnd > addedArrayStart)
+                        {
+                            string addedText = text.Substring(addedArrayStart + 1, addedArrayEnd - addedArrayStart - 1);
+                            string[] addedParts = addedText.Split(new char[] { '\n', '\r', ',', '"' }, StringSplitOptions.RemoveEmptyEntries);
+                            foreach (string part in addedParts)
+                            {
+                                string id = NormalizeFavoriteIdText(part);
+                                if (!string.IsNullOrWhiteSpace(id) && !playlist.AddedSongIds.Contains(id))
+                                {
+                                    playlist.AddedSongIds.Add(id);
+                                }
+                            }
+                            arrayEnd = addedArrayEnd;
+                        }
+                    }
+                    if (playlist.AddedSongIds.Count == 0)
+                    {
+                        playlist.AddedSongIds.AddRange(playlist.SongIds);
+                    }
                     index = arrayEnd + 1;
                 }
                 else
@@ -5798,6 +7181,14 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
                     if (j < playlist.SongIds.Count - 1) { builder.Append(","); }
                     builder.AppendLine();
                 }
+                builder.AppendLine("    ],");
+                builder.AppendLine("    \"added\": [");
+                for (int j = 0; j < playlist.AddedSongIds.Count; j++)
+                {
+                    builder.Append("      \""); builder.Append(EscapeJsonString(playlist.AddedSongIds[j])); builder.Append("\"");
+                    if (j < playlist.AddedSongIds.Count - 1) { builder.Append(","); }
+                    builder.AppendLine();
+                }
                 builder.AppendLine("    ]");
                 builder.Append("  }");
                 if (i < betterJukeboxPlaylists.Count - 1) { builder.Append(","); }
@@ -5835,7 +7226,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
     {
         if (searchPlaylistsActionRow == null) { return; }
         searchPlaylistsActionRow.Clear();
-        if (!showOnlyPlaylistSearchResults)
+        if (!showOnlyPlaylistSearchResults || multiSelectMode)
         {
             searchPlaylistsActionRow.style.display = DisplayStyle.None;
             return;
@@ -5847,9 +7238,11 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         else
         {
-            searchPlaylistsActionRow.Add(CreateSmallPanelButton("‹ Playlists", () => { selectedPlaylistName = null; UpdatePlaylistActionRowVisibility(); UpdateSearchResults(searchTextField != null ? searchTextField.value : ""); }));
+            searchPlaylistsActionRow.Add(CreateSmallPanelButton("‹ Playlists", () => { CancelMultiSelectForNavigation(); selectedPlaylistName = null; UpdatePlaylistActionRowVisibility(); UpdateSearchResults(searchTextField != null ? searchTextField.value : ""); }));
             searchPlaylistsActionRow.Add(CreateSmallPanelButton("Queue All", QueueSelectedPlaylist));
             searchPlaylistsActionRow.Add(CreateSmallPanelButton("Shuffle Playlist", ShuffleSelectedPlaylist));
+            searchPlaylistsActionRow.Add(CreateSmallPanelButton("Sort A-Z", SortSelectedPlaylistAlphabetically));
+            searchPlaylistsActionRow.Add(CreateSmallPanelButton("Sort Recently Added", SortSelectedPlaylistRecentlyAdded));
             searchPlaylistsActionRow.Add(CreateSmallPanelButton("Rename", () => ShowPlaylistNameDialog("Rename Playlist", "Rename", selectedPlaylistName, name => RenameSelectedPlaylist(name))));
             VisualElement spacer = new VisualElement();
             spacer.style.flexGrow = 1f;
@@ -5880,10 +7273,13 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
                 return;
             }
             VisualElement section = CreatePremiumPanelSection("Playlists", "Create and manage your song lists.");
-            foreach (BetterJukeboxPlaylist playlist in betterJukeboxPlaylists.OrderBy(it => it.Name).ToList())
+            List<BetterJukeboxPlaylist> orderedPlaylists = betterJukeboxPlaylists
+                .Where(it => it != null)
+                .OrderByDescending(it => query.Length > 0 && it.Name != null && it.Name.ToLowerInvariant().IndexOf(query) >= 0)
+                .ThenBy(it => it.Name)
+                .ToList();
+            foreach (BetterJukeboxPlaylist playlist in orderedPlaylists)
             {
-                if (playlist == null) { continue; }
-                if (query.Length > 0 && playlist.Name.ToLowerInvariant().IndexOf(query) < 0) { continue; }
                 section.Add(CreatePlaylistListRow(playlist));
             }
             searchResultsContainer.Add(section);
@@ -5901,19 +7297,20 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         List<SongMeta> songs = GetPlaylistSongMetas(selected);
         if (query.Length > 0)
         {
-            songs = songs.Where(songMeta => MatchesSearch(songMeta, query)).ToList();
+            // Keep the special "move matches to the top" behavior only for the playlist overview.
+            // Inside a selected playlist, search should behave like the normal song list and filter songs.
+            songs = songs
+                .Where(songMeta => MatchesSearch(songMeta, query))
+                .ToList();
         }
         if (songs.Count == 0)
         {
-            searchResultsContainer.Add(CreateEmptyState("🎵", selected.Name, "No songs in this playlist yet."));
+            searchResultsContainer.Add(CreateEmptyState("🎵", selected.Name, query.Length > 0 ? "No matching songs in this playlist." : "No songs in this playlist yet."));
             return;
         }
-        VisualElement songSection = CreatePremiumPanelSection(selected.Name, songs.Count + (songs.Count == 1 ? " song" : " songs"));
-        foreach (SongMeta songMeta in songs)
-        {
-            songSection.Add(CreatePlaylistSongRow(songMeta, selected));
-        }
-        searchResultsContainer.Add(songSection);
+        playlistRowElements.Clear();
+        playlistRowSongMetas.Clear();
+        StartProgressiveSearchRender(selected.Name, songs, true, selected);
     }
 
     private VisualElement CreatePlaylistListRow(BetterJukeboxPlaylist playlist)
@@ -5949,8 +7346,10 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         {
             return;
         }
+        CancelMultiSelectForNavigation();
         selectedPlaylistName = playlist.Name;
         UpdatePlaylistActionRowVisibility();
+        UpdateMultiSelectActionRowVisibility();
         UpdateSearchResults(searchTextField != null ? searchTextField.value : "");
     }
 
@@ -5971,17 +7370,258 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
     private VisualElement CreatePlaylistSongRow(SongMeta songMeta, BetterJukeboxPlaylist playlist)
     {
         VisualElement row = CreatePanelRow();
-        if (modSettings.ShowAlbumArtInSearch)
+        ConfigureSongRowForMultiSelect(row, songMeta);
+        if (multiSelectMode)
+        {
+            row.Add(CreateMultiSelectCheckmark(songMeta));
+        }
+        if (!multiSelectMode)
+        {
+            int playlistIndex = GetPlaylistSongIndex(playlist, songMeta);
+            Label dragHandle = CreatePanelLabel("≡");
+            dragHandle.style.marginRight = 12;
+            dragHandle.style.fontSize = 24;
+            dragHandle.style.color = GetAccentColor();
+            row.Add(dragHandle);
+            RegisterPlaylistDragHandle(dragHandle, row, playlist, songMeta, playlistIndex);
+        }
+        if (modSettings.ShowAlbumArtInPlaylists)
         {
             row.Add(CreateAlbumArtElement(songMeta));
         }
         Label label = CreatePanelLabel(songMeta != null ? songMeta.GetArtistDashTitle() : "Unknown song");
         label.style.flexGrow = 1f;
         row.Add(label);
-        row.Add(CreateSmallPanelButton("Queue", () => AddSongToQueue(songMeta, false)));
-        row.Add(CreateSmallPanelButton("Remove", () => { RemoveSongFromPlaylist(playlist, songMeta); UpdateSearchResults(searchTextField != null ? searchTextField.value : ""); }));
-        row.Add(CreateFavoriteStarButton(songMeta, () => UpdateSearchResults(searchTextField != null ? searchTextField.value : "")));
+        if (!multiSelectMode)
+        {
+            row.Add(CreateSmallPanelButton("Queue", () => AddSongToQueue(songMeta, false)));
+            row.Add(CreatePlaylistMoveHoldButton("↑", "⇧", "⇈", playlist, songMeta, -1, row));
+            row.Add(CreatePlaylistMoveHoldButton("↓", "⇩", "⇊", playlist, songMeta, 1, row));
+            row.Add(CreateSmallPanelButton("Remove", () => { RemoveSongFromPlaylist(playlist, songMeta); UpdateSearchResults(searchTextField != null ? searchTextField.value : ""); }));
+            row.Add(CreateFavoriteStarButton(songMeta, () => UpdateSearchResults(searchTextField != null ? searchTextField.value : "")));
+            playlistRowElements.Add(row);
+            playlistRowSongMetas.Add(songMeta);
+        }
         return row;
+    }
+
+    private void RegisterPlaylistDragHandle(Label dragHandle, VisualElement row, BetterJukeboxPlaylist playlist, SongMeta songMeta, int playlistIndex)
+    {
+        if (dragHandle == null || row == null || playlist == null || songMeta == null)
+        {
+            return;
+        }
+
+        dragHandle.RegisterCallback<PointerDownEvent>(evt =>
+        {
+            if (evt.button != 0)
+            {
+                return;
+            }
+            draggingPlaylistIndex = GetPlaylistSongIndex(playlist, songMeta);
+            currentPlaylistDropIndex = FindPlaylistDisplayIndex(songMeta);
+            draggingPlaylist = playlist;
+            row.style.opacity = 0.55f;
+            CreatePlaylistDragGhost(songMeta.GetArtistDashTitle(), evt.position);
+            HighlightPlaylistDropTarget(currentPlaylistDropIndex);
+            try { dragHandle.CapturePointer(evt.pointerId); } catch { }
+            evt.StopPropagation();
+        });
+
+        dragHandle.RegisterCallback<PointerMoveEvent>(evt =>
+        {
+            if (draggingPlaylistIndex < 0 || draggingPlaylist == null)
+            {
+                return;
+            }
+            UpdatePlaylistDragGhost(evt.position);
+            int targetIndex = FindPlaylistDropIndex(evt.position);
+            if (targetIndex >= 0 && targetIndex != currentPlaylistDropIndex)
+            {
+                currentPlaylistDropIndex = targetIndex;
+                HighlightPlaylistDropTarget(targetIndex);
+            }
+            evt.StopPropagation();
+        });
+
+        dragHandle.RegisterCallback<PointerUpEvent>(evt =>
+        {
+            if (draggingPlaylistIndex < 0 || draggingPlaylist == null)
+            {
+                return;
+            }
+
+            int targetIndex = FindPlaylistDropIndex(evt.position);
+            BetterJukeboxPlaylist dragPlaylist = draggingPlaylist;
+            draggingPlaylistIndex = -1;
+            currentPlaylistDropIndex = -1;
+            draggingPlaylist = null;
+            row.style.opacity = 1f;
+            RemovePlaylistDragGhost();
+            ClearPlaylistDropHighlights();
+            try { dragHandle.ReleasePointer(evt.pointerId); } catch { }
+
+            int sourceDisplayIndex = FindPlaylistDisplayIndex(songMeta);
+            if (targetIndex >= 0 && targetIndex != sourceDisplayIndex)
+            {
+                MovePlaylistSongToDisplayedIndex(dragPlaylist, songMeta, targetIndex);
+            }
+            evt.StopPropagation();
+        });
+    }
+
+    private int FindPlaylistDisplayIndex(SongMeta songMeta)
+    {
+        if (songMeta == null)
+        {
+            return -1;
+        }
+        for (int i = 0; i < playlistRowSongMetas.Count; i++)
+        {
+            if (playlistRowSongMetas[i] == songMeta)
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private void MovePlaylistSongToDisplayedIndex(BetterJukeboxPlaylist playlist, SongMeta songMeta, int targetDisplayIndex)
+    {
+        if (playlist == null || playlist.SongIds == null || songMeta == null || targetDisplayIndex < 0 || targetDisplayIndex >= playlistRowSongMetas.Count)
+        {
+            return;
+        }
+
+        SongMeta targetSongMeta = playlistRowSongMetas[targetDisplayIndex];
+        int sourceIndex = GetPlaylistSongIndex(playlist, songMeta);
+        int targetIndex = GetPlaylistSongIndex(playlist, targetSongMeta);
+        if (sourceIndex < 0 || targetIndex < 0 || sourceIndex == targetIndex)
+        {
+            return;
+        }
+
+        string id = playlist.SongIds[sourceIndex];
+        playlist.SongIds.RemoveAt(sourceIndex);
+        if (sourceIndex < targetIndex)
+        {
+            targetIndex--;
+        }
+        targetIndex = Mathf.Clamp(targetIndex, 0, playlist.SongIds.Count);
+        playlist.SongIds.Insert(targetIndex, id);
+        SavePlaylists();
+        UpdateSearchResults(searchTextField != null ? searchTextField.value : "");
+    }
+
+    private void CreatePlaylistDragGhost(string displayName, Vector2 pointerPosition)
+    {
+        RemovePlaylistDragGhost();
+        if (searchPanel == null)
+        {
+            return;
+        }
+
+        playlistDragGhost = new VisualElement();
+        playlistDragGhost.name = "betterJukeboxPlaylistDragGhost";
+        playlistDragGhost.style.position = Position.Absolute;
+        playlistDragGhost.style.left = new StyleLength(new Length(Mathf.Max(8, pointerPosition.x - searchPanel.worldBound.x + 16), LengthUnit.Pixel));
+        playlistDragGhost.style.top = new StyleLength(new Length(Mathf.Max(8, pointerPosition.y - searchPanel.worldBound.y + 8), LengthUnit.Pixel));
+        playlistDragGhost.style.paddingLeft = 12;
+        playlistDragGhost.style.paddingRight = 12;
+        playlistDragGhost.style.paddingTop = 8;
+        playlistDragGhost.style.paddingBottom = 8;
+        playlistDragGhost.style.backgroundColor = new Color(0.08f, 0.08f, 0.12f, 0.96f);
+        playlistDragGhost.style.borderTopLeftRadius = 10;
+        playlistDragGhost.style.borderTopRightRadius = 10;
+        playlistDragGhost.style.borderBottomLeftRadius = 10;
+        playlistDragGhost.style.borderBottomRightRadius = 10;
+        playlistDragGhost.pickingMode = PickingMode.Ignore;
+
+        Label label = CreatePanelLabel("↕ " + displayName);
+        label.style.marginRight = new StyleLength(new Length(0, LengthUnit.Pixel));
+        playlistDragGhost.Add(label);
+        searchPanel.Add(playlistDragGhost);
+        playlistDragGhost.BringToFront();
+    }
+
+    private void UpdatePlaylistDragGhost(Vector2 pointerPosition)
+    {
+        if (playlistDragGhost == null || searchPanel == null)
+        {
+            return;
+        }
+        playlistDragGhost.style.left = new StyleLength(new Length(Mathf.Max(8, pointerPosition.x - searchPanel.worldBound.x + 16), LengthUnit.Pixel));
+        playlistDragGhost.style.top = new StyleLength(new Length(Mathf.Max(8, pointerPosition.y - searchPanel.worldBound.y + 8), LengthUnit.Pixel));
+    }
+
+    private void RemovePlaylistDragGhost()
+    {
+        if (playlistDragGhost != null)
+        {
+            playlistDragGhost.RemoveFromHierarchy();
+            playlistDragGhost = null;
+        }
+    }
+
+    private void HighlightPlaylistDropTarget(int targetIndex)
+    {
+        for (int i = 0; i < playlistRowElements.Count; i++)
+        {
+            VisualElement row = playlistRowElements[i];
+            if (row == null)
+            {
+                continue;
+            }
+            row.style.backgroundColor = i == targetIndex ? new Color(0.12f, 0.22f, 0.38f, 0.72f) : GetRowColor();
+        }
+    }
+
+    private void ClearPlaylistDropHighlights()
+    {
+        for (int i = 0; i < playlistRowElements.Count; i++)
+        {
+            VisualElement row = playlistRowElements[i];
+            if (row != null)
+            {
+                row.style.backgroundColor = GetRowColor();
+            }
+        }
+    }
+
+    private int FindPlaylistDropIndex(Vector2 pointerPosition)
+    {
+        if (playlistRowElements == null || playlistRowElements.Count == 0)
+        {
+            return -1;
+        }
+
+        for (int i = 0; i < playlistRowElements.Count; i++)
+        {
+            VisualElement row = playlistRowElements[i];
+            if (row != null && row.worldBound.Contains(pointerPosition))
+            {
+                return i;
+            }
+        }
+
+        float bestDistance = float.MaxValue;
+        int bestIndex = -1;
+        for (int i = 0; i < playlistRowElements.Count; i++)
+        {
+            VisualElement row = playlistRowElements[i];
+            if (row == null)
+            {
+                continue;
+            }
+            float centerY = row.worldBound.y + row.worldBound.height / 2f;
+            float distance = Mathf.Abs(pointerPosition.y - centerY);
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                bestIndex = i;
+            }
+        }
+        return bestIndex;
     }
 
     private List<SongMeta> GetPlaylistSongMetas(BetterJukeboxPlaylist playlist)
@@ -6016,6 +7656,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         selectedPlaylistName = cleanName;
         UpdatePlaylistFilterButtonText();
         UpdatePlaylistActionRowVisibility();
+        UpdateMultiSelectActionRowVisibility();
         UpdateSearchResults(searchTextField != null ? searchTextField.value : "");
     }
 
@@ -6041,6 +7682,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         selectedPlaylistName = cleanName;
         SavePlaylists();
         UpdatePlaylistActionRowVisibility();
+        UpdateMultiSelectActionRowVisibility();
         UpdateSearchResults(searchTextField != null ? searchTextField.value : "");
     }
 
@@ -6196,6 +7838,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         SavePlaylists();
         UpdatePlaylistFilterButtonText();
         UpdatePlaylistActionRowVisibility();
+        UpdateMultiSelectActionRowVisibility();
         UpdateSearchResults(searchTextField != null ? searchTextField.value : "");
     }
 
@@ -6213,14 +7856,87 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
     private void ShuffleSelectedPlaylist()
     {
         BetterJukeboxPlaylist playlist = FindPlaylist(selectedPlaylistName);
-        List<SongMeta> songs = GetPlaylistSongMetas(playlist);
+        if (playlist == null || playlist.SongIds == null || playlist.SongIds.Count <= 1)
+        {
+            return;
+        }
+
         System.Random random = new System.Random();
-        songs = songs.OrderBy(it => random.Next()).ToList();
+        for (int i = playlist.SongIds.Count - 1; i > 0; i--)
+        {
+            int j = random.Next(i + 1);
+            string temp = playlist.SongIds[i];
+            playlist.SongIds[i] = playlist.SongIds[j];
+            playlist.SongIds[j] = temp;
+        }
+
+        SavePlaylists();
+        UpdateSearchResults(searchTextField != null ? searchTextField.value : "");
+    }
+
+    private void SortSelectedPlaylistAlphabetically()
+    {
+        BetterJukeboxPlaylist playlist = FindPlaylist(selectedPlaylistName);
+        if (playlist == null || playlist.SongIds == null || playlist.SongIds.Count <= 1)
+        {
+            return;
+        }
+
+        List<SongMeta> songs = GetPlaylistSongMetas(playlist).OrderBy(songMeta => songMeta != null ? songMeta.GetArtistDashTitle() : "").ToList();
+        List<string> sortedIds = new List<string>();
         foreach (SongMeta songMeta in songs)
         {
-            AddSongToQueue(songMeta, false);
+            int index = GetPlaylistSongIndex(playlist, songMeta);
+            if (index >= 0)
+            {
+                string id = playlist.SongIds[index];
+                if (!sortedIds.Contains(id))
+                {
+                    sortedIds.Add(id);
+                }
+            }
         }
-        UpdateQueueBadge(true);
+        if (sortedIds.Count == playlist.SongIds.Count)
+        {
+            playlist.SongIds.Clear();
+            playlist.SongIds.AddRange(sortedIds);
+            SavePlaylists();
+            UpdateSearchResults(searchTextField != null ? searchTextField.value : "");
+        }
+    }
+
+    private void SortSelectedPlaylistRecentlyAdded()
+    {
+        BetterJukeboxPlaylist playlist = FindPlaylist(selectedPlaylistName);
+        if (playlist == null || playlist.SongIds == null || playlist.SongIds.Count <= 1)
+        {
+            return;
+        }
+
+        if (playlist.AddedSongIds.Count == 0)
+        {
+            playlist.AddedSongIds.AddRange(playlist.SongIds);
+        }
+
+        List<string> sortedIds = new List<string>();
+        foreach (string id in playlist.AddedSongIds)
+        {
+            if (!string.IsNullOrWhiteSpace(id) && playlist.SongIds.Contains(id) && !sortedIds.Contains(id))
+            {
+                sortedIds.Add(id);
+            }
+        }
+        foreach (string id in playlist.SongIds)
+        {
+            if (!string.IsNullOrWhiteSpace(id) && !sortedIds.Contains(id))
+            {
+                sortedIds.Add(id);
+            }
+        }
+        playlist.SongIds.Clear();
+        playlist.SongIds.AddRange(sortedIds);
+        SavePlaylists();
+        UpdateSearchResults(searchTextField != null ? searchTextField.value : "");
     }
 
     private void AddSongToPlaylist(BetterJukeboxPlaylist playlist, SongMeta songMeta)
@@ -6231,6 +7947,8 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         if (!playlist.SongIds.Contains(id))
         {
             playlist.SongIds.Insert(0, id);
+            playlist.AddedSongIds.Remove(id);
+            playlist.AddedSongIds.Insert(0, id);
             SavePlaylists();
         }
         UpdatePlaylistFilterButtonText();
@@ -6243,8 +7961,305 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         foreach (string id in ids)
         {
             playlist.SongIds.Remove(id);
+            playlist.AddedSongIds.Remove(id);
         }
         SavePlaylists();
+    }
+
+
+    private int GetPlaylistSongIndex(BetterJukeboxPlaylist playlist, SongMeta songMeta)
+    {
+        if (playlist == null || playlist.SongIds == null || songMeta == null)
+        {
+            return -1;
+        }
+
+        List<string> songIds = GetFavoriteSongMetaIds(songMeta);
+        for (int i = 0; i < playlist.SongIds.Count; i++)
+        {
+            string playlistSongId = playlist.SongIds[i];
+            if (!string.IsNullOrWhiteSpace(playlistSongId) && songIds.Contains(playlistSongId))
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private void MovePlaylistSong(BetterJukeboxPlaylist playlist, SongMeta songMeta, int direction)
+    {
+        if (playlist == null || playlist.SongIds == null || playlist.SongIds.Count <= 1)
+        {
+            return;
+        }
+
+        int index = GetPlaylistSongIndex(playlist, songMeta);
+        int newIndex = index + direction;
+        if (index < 0 || newIndex < 0 || newIndex >= playlist.SongIds.Count)
+        {
+            return;
+        }
+
+        string id = playlist.SongIds[index];
+        playlist.SongIds.RemoveAt(index);
+        playlist.SongIds.Insert(newIndex, id);
+        SavePlaylists();
+        UpdateSearchResults(searchTextField != null ? searchTextField.value : "");
+    }
+
+    private void MovePlaylistSongToEdge(BetterJukeboxPlaylist playlist, SongMeta songMeta, int direction)
+    {
+        if (playlist == null || playlist.SongIds == null || playlist.SongIds.Count <= 1)
+        {
+            return;
+        }
+
+        int index = GetPlaylistSongIndex(playlist, songMeta);
+        if (index < 0)
+        {
+            return;
+        }
+
+        int targetIndex = direction < 0 ? 0 : playlist.SongIds.Count - 1;
+        if (index == targetIndex)
+        {
+            return;
+        }
+
+        string id = playlist.SongIds[index];
+        playlist.SongIds.RemoveAt(index);
+        playlist.SongIds.Insert(targetIndex, id);
+        SavePlaylists();
+        UpdateSearchResults(searchTextField != null ? searchTextField.value : "");
+    }
+
+    private Button CreatePlaylistMoveHoldButton(string normalIcon, string middleIcon, string readyIcon, BetterJukeboxPlaylist playlist, SongMeta songMeta, int direction, VisualElement row)
+    {
+        Button button = null;
+        button = new Button(() =>
+        {
+            if (playlistHoldMoveSuppressNextClick)
+            {
+                playlistHoldMoveSuppressNextClick = false;
+                return;
+            }
+            MovePlaylistSong(playlist, songMeta, direction);
+        });
+        button.tooltip = direction < 0 ? "Move up. Hold to move to top." : "Move down. Hold to move to bottom.";
+        button.AddToClassList("tinyFont");
+        button.style.marginLeft = 4;
+        button.style.marginRight = 4;
+        button.style.flexGrow = 0f;
+        button.style.flexShrink = 0f;
+        AddButtonVisual(button, normalIcon, "tinyFont", 11f, 11f, 6f, 6f, 11f);
+
+        VisualElement fill = new VisualElement();
+        fill.name = "betterJukeboxPlaylistHoldFill";
+        fill.style.position = Position.Absolute;
+        fill.style.left = new StyleLength(new Length(0, LengthUnit.Pixel));
+        fill.style.top = new StyleLength(new Length(0, LengthUnit.Pixel));
+        fill.style.bottom = new StyleLength(new Length(0, LengthUnit.Pixel));
+        fill.style.width = new StyleLength(new Length(0, LengthUnit.Percent));
+        fill.style.backgroundColor = GetQueueHoldFillColor(0f);
+        fill.style.borderTopLeftRadius = 11f;
+        fill.style.borderTopRightRadius = 11f;
+        fill.style.borderBottomLeftRadius = 11f;
+        fill.style.borderBottomRightRadius = 11f;
+        fill.pickingMode = PickingMode.Ignore;
+        button.Insert(1, fill);
+
+        Label label = GetButtonVisualLabel(button);
+        if (label != null)
+        {
+            label.BringToFront();
+        }
+
+        button.RegisterCallback<PointerDownEvent>(evt =>
+        {
+            if (evt.button == 0)
+            {
+                BeginPlaylistHoldMove(button, row, playlist, songMeta, direction);
+            }
+        }, TrickleDown.TrickleDown);
+
+        button.RegisterCallback<PointerUpEvent>(evt =>
+        {
+            if (evt.button == 0)
+            {
+                EndPlaylistHoldMove(button, direction);
+            }
+        }, TrickleDown.TrickleDown);
+
+        button.RegisterCallback<MouseDownEvent>(evt =>
+        {
+            if (evt.button == 0)
+            {
+                BeginPlaylistHoldMove(button, row, playlist, songMeta, direction);
+            }
+        }, TrickleDown.TrickleDown);
+
+        button.RegisterCallback<MouseUpEvent>(evt =>
+        {
+            if (evt.button == 0)
+            {
+                EndPlaylistHoldMove(button, direction);
+            }
+        }, TrickleDown.TrickleDown);
+
+        button.RegisterCallback<PointerCancelEvent>(evt =>
+        {
+            CancelPlaylistHoldMove(button);
+        });
+
+        button.RegisterCallback<PointerLeaveEvent>(evt =>
+        {
+            CancelPlaylistHoldMove(button);
+        });
+
+        RegisterButtonThemeHover(button);
+        return button;
+    }
+
+    private void BeginPlaylistHoldMove(Button button, VisualElement row, BetterJukeboxPlaylist playlist, SongMeta songMeta, int direction)
+    {
+        if (button == null)
+        {
+            return;
+        }
+        if (playlistHoldMoveButton == button && playlistHoldMoveStartedAt >= 0f)
+        {
+            return;
+        }
+
+        playlistHoldMoveButton = button;
+        playlistHoldMoveRow = row;
+        playlistHoldMovePlaylist = playlist;
+        playlistHoldMoveSongMeta = songMeta;
+        playlistHoldMoveDirection = direction;
+        playlistHoldMoveStartedAt = Time.unscaledTime;
+        ApplyPlaylistHoldMoveProgress(button, row, direction, 0f);
+    }
+
+    private void EndPlaylistHoldMove(Button button, int direction)
+    {
+        if (button == null || button != playlistHoldMoveButton)
+        {
+            return;
+        }
+
+        float progress = GetPlaylistHoldMoveProgress();
+        BetterJukeboxPlaylist playlist = playlistHoldMovePlaylist;
+        SongMeta songMeta = playlistHoldMoveSongMeta;
+        ResetPlaylistHoldMoveVisual(button, playlistHoldMoveRow);
+        playlistHoldMoveButton = null;
+        playlistHoldMoveRow = null;
+        playlistHoldMovePlaylist = null;
+        playlistHoldMoveSongMeta = null;
+        playlistHoldMoveStartedAt = -1f;
+
+        if (progress >= 1f)
+        {
+            playlistHoldMoveSuppressNextClick = true;
+            MovePlaylistSongToEdge(playlist, songMeta, direction);
+        }
+    }
+
+    private void CancelPlaylistHoldMove(Button button)
+    {
+        if (button == null || button != playlistHoldMoveButton)
+        {
+            return;
+        }
+
+        ResetPlaylistHoldMoveVisual(button, playlistHoldMoveRow);
+        playlistHoldMoveButton = null;
+        playlistHoldMoveRow = null;
+        playlistHoldMovePlaylist = null;
+        playlistHoldMoveSongMeta = null;
+        playlistHoldMoveStartedAt = -1f;
+    }
+
+    private void ProcessPlaylistHoldMoveProgress()
+    {
+        if (playlistHoldMoveButton == null || playlistHoldMoveStartedAt < 0f)
+        {
+            return;
+        }
+
+        ApplyPlaylistHoldMoveProgress(playlistHoldMoveButton, playlistHoldMoveRow, playlistHoldMoveDirection, GetPlaylistHoldMoveProgress());
+    }
+
+    private float GetPlaylistHoldMoveProgress()
+    {
+        if (playlistHoldMoveStartedAt < 0f)
+        {
+            return 0f;
+        }
+
+        float heldSeconds = Time.unscaledTime - playlistHoldMoveStartedAt;
+        if (heldSeconds < QueueHoldMoveGraceSeconds)
+        {
+            return 0f;
+        }
+
+        return Mathf.Clamp01((heldSeconds - QueueHoldMoveGraceSeconds) / QueueHoldMoveReadySeconds);
+    }
+
+    private void ApplyPlaylistHoldMoveProgress(Button button, VisualElement row, int direction, float progress)
+    {
+        if (button == null)
+        {
+            return;
+        }
+
+        VisualElement fill = button.Q("betterJukeboxPlaylistHoldFill");
+        if (fill != null)
+        {
+            fill.style.width = new StyleLength(new Length(Mathf.Clamp01(progress) * 100f, LengthUnit.Percent));
+            fill.style.backgroundColor = GetQueueHoldFillColor(progress);
+        }
+
+        string icon = direction < 0 ? "↑" : "↓";
+        if (progress >= 1f)
+        {
+            icon = direction < 0 ? "⇈" : "⇊";
+        }
+        else if (progress >= 0.45f)
+        {
+            icon = direction < 0 ? "⇧" : "⇩";
+        }
+        SetButtonVisualText(button, icon);
+
+        Label label = GetButtonVisualLabel(button);
+        if (label != null)
+        {
+            label.style.color = progress >= 1f ? Color.white : GetButtonTextColor();
+        }
+
+        if (row != null)
+        {
+            row.style.backgroundColor = progress >= 1f
+                ? GetRowPulseColor()
+                : new Color(0f, 0f, 0f, 0.25f + (0.20f * Mathf.Clamp01(progress)));
+        }
+    }
+
+    private void ResetPlaylistHoldMoveVisual(Button button, VisualElement row)
+    {
+        if (button != null)
+        {
+            VisualElement fill = button.Q("betterJukeboxPlaylistHoldFill");
+            if (fill != null)
+            {
+                fill.style.width = new StyleLength(new Length(0, LengthUnit.Percent));
+            }
+            ApplyButtonNormalStyle(button);
+        }
+
+        if (row != null)
+        {
+            row.style.backgroundColor = GetRowColor();
+        }
     }
 
     private void ShowAddToPlaylistDialog(SongMeta songMeta)
@@ -7077,7 +9092,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         if (variant == 2)
         {
-            return IsDiscoPurpleTheme() ? new Color(0.84f, 0.56f, 1f, 1f) : new Color(0.74f, 0.82f, 0.94f, 1f);
+            return GetAccentColor();
         }
         if (variant == 3)
         {
@@ -7085,7 +9100,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         if (variant == 4)
         {
-            return IsDiscoPurpleTheme() ? new Color(0.62f, 0.36f, 1f, 1f) : new Color(0.56f, 0.64f, 0.76f, 1f);
+            return GetAccentHoverColor();
         }
         return new Color(1f, 0.66f, 0.28f, 1f);
     }
@@ -7256,75 +9271,220 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
     private Color GetPanelTopBorderColor()
     {
-        if (!IsDiscoPurpleTheme())
+        int theme = GetUiThemeIndex();
+        if (theme == 0)
         {
             return new Color(0.42f, 0.48f, 0.58f, 0.34f);
+        }
+        if (theme == 2)
+        {
+            return new Color(0.18f, 0.64f, 0.34f, 0.38f);
+        }
+        if (theme == 3)
+        {
+            return new Color(0.22f, 0.50f, 1f, 0.38f);
+        }
+        if (theme == 4)
+        {
+            return new Color(0.95f, 0.24f, 0.26f, 0.38f);
+        }
+        if (theme == 5)
+        {
+            return new Color(1f, 0.70f, 0.22f, 0.40f);
         }
         return new Color(0.55f, 0.34f, 1f, 0.38f);
     }
 
     private Color GetPanelSideBorderColor()
     {
-        if (!IsDiscoPurpleTheme())
+        int theme = GetUiThemeIndex();
+        if (theme == 0)
         {
             return new Color(0.34f, 0.40f, 0.50f, 0.26f);
+        }
+        if (theme == 2)
+        {
+            return new Color(0.14f, 0.50f, 0.27f, 0.24f);
+        }
+        if (theme == 3)
+        {
+            return new Color(0.18f, 0.38f, 0.82f, 0.24f);
+        }
+        if (theme == 4)
+        {
+            return new Color(0.78f, 0.18f, 0.20f, 0.24f);
+        }
+        if (theme == 5)
+        {
+            return new Color(0.86f, 0.56f, 0.16f, 0.26f);
         }
         return new Color(0.55f, 0.34f, 1f, 0.24f);
     }
 
     private Color GetAccentColor()
     {
-        if (!IsDiscoPurpleTheme())
+        int theme = GetUiThemeIndex();
+        if (theme == 0)
         {
             return new Color(0.66f, 0.74f, 0.86f, 0.92f);
+        }
+        if (theme == 2)
+        {
+            return new Color(0.18f, 0.94f, 0.44f, 0.96f);
+        }
+        if (theme == 3)
+        {
+            return new Color(0.22f, 0.58f, 1f, 0.96f);
+        }
+        if (theme == 4)
+        {
+            return new Color(1f, 0.28f, 0.30f, 0.96f);
+        }
+        if (theme == 5)
+        {
+            return new Color(1f, 0.74f, 0.22f, 0.98f);
         }
         return new Color(0.62f, 0.36f, 1f, 0.96f);
     }
 
     private Color GetAccentHoverColor()
     {
-        if (!IsDiscoPurpleTheme())
+        int theme = GetUiThemeIndex();
+        if (theme == 0)
         {
             return new Color(0.52f, 0.60f, 0.72f, 0.62f);
+        }
+        if (theme == 2)
+        {
+            return new Color(0.12f, 0.64f, 0.30f, 0.72f);
+        }
+        if (theme == 3)
+        {
+            return new Color(0.16f, 0.38f, 0.86f, 0.72f);
+        }
+        if (theme == 4)
+        {
+            return new Color(0.78f, 0.18f, 0.22f, 0.72f);
+        }
+        if (theme == 5)
+        {
+            return new Color(0.88f, 0.54f, 0.12f, 0.74f);
         }
         return new Color(0.45f, 0.33f, 0.78f, 0.72f);
     }
 
     private Color GetButtonBaseColor()
     {
+        int theme = GetUiThemeIndex();
+        if (theme == 2)
+        {
+            return new Color(0.08f, 0.15f, 0.10f, 0.98f);
+        }
+        if (theme == 3)
+        {
+            return new Color(0.08f, 0.12f, 0.22f, 0.98f);
+        }
+        if (theme == 4)
+        {
+            return new Color(0.18f, 0.08f, 0.10f, 0.98f);
+        }
+        if (theme == 5)
+        {
+            return new Color(0.18f, 0.14f, 0.07f, 0.98f);
+        }
         return new Color(0.13f, 0.16f, 0.24f, 0.98f);
     }
 
     private Color GetButtonHoverColor()
     {
-        if (!IsDiscoPurpleTheme())
+        int theme = GetUiThemeIndex();
+        if (theme == 0)
         {
             return new Color(0.17f, 0.21f, 0.30f, 0.99f);
+        }
+        if (theme == 2)
+        {
+            return new Color(0.10f, 0.20f, 0.13f, 0.99f);
+        }
+        if (theme == 3)
+        {
+            return new Color(0.10f, 0.15f, 0.30f, 0.99f);
+        }
+        if (theme == 4)
+        {
+            return new Color(0.24f, 0.10f, 0.12f, 0.99f);
+        }
+        if (theme == 5)
+        {
+            return new Color(0.24f, 0.18f, 0.08f, 0.99f);
         }
         return new Color(0.16f, 0.17f, 0.28f, 0.99f);
     }
 
     private Color GetButtonBorderColor()
     {
-        if (!IsDiscoPurpleTheme())
+        int theme = GetUiThemeIndex();
+        if (theme == 0)
         {
             return new Color(0.34f, 0.40f, 0.52f, 0.70f);
+        }
+        if (theme == 2)
+        {
+            return new Color(0.12f, 0.45f, 0.24f, 0.92f);
+        }
+        if (theme == 3)
+        {
+            return new Color(0.16f, 0.34f, 0.68f, 0.92f);
+        }
+        if (theme == 4)
+        {
+            return new Color(0.62f, 0.16f, 0.18f, 0.92f);
+        }
+        if (theme == 5)
+        {
+            return new Color(0.72f, 0.46f, 0.12f, 0.94f);
         }
         return new Color(0.30f, 0.24f, 0.55f, 0.92f);
     }
 
     private Color GetButtonPulseColor()
     {
-        if (!IsDiscoPurpleTheme())
+        int theme = GetUiThemeIndex();
+        if (theme == 0)
         {
             return new Color(0.20f, 0.24f, 0.34f, 0.99f);
+        }
+        if (theme == 2)
+        {
+            return new Color(0.10f, 0.26f, 0.14f, 0.99f);
+        }
+        if (theme == 3)
+        {
+            return new Color(0.10f, 0.18f, 0.38f, 0.99f);
+        }
+        if (theme == 4)
+        {
+            return new Color(0.30f, 0.10f, 0.12f, 0.99f);
+        }
+        if (theme == 5)
+        {
+            return new Color(0.30f, 0.22f, 0.08f, 0.99f);
         }
         return new Color(0.23f, 0.18f, 0.38f, 0.99f);
     }
 
     private Color GetButtonTextColor()
     {
-        if (!IsDiscoPurpleTheme())
+        int theme = GetUiThemeIndex();
+        if (theme == 2)
+        {
+            return new Color(0.94f, 1f, 0.96f, 1f);
+        }
+        if (theme == 5)
+        {
+            return new Color(1f, 0.98f, 0.92f, 1f);
+        }
+        if (theme == 0)
         {
             return new Color(0.96f, 0.97f, 1f, 1f);
         }
@@ -7338,18 +9498,52 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
     private Color GetRowHoverColor()
     {
-        if (!IsDiscoPurpleTheme())
+        int theme = GetUiThemeIndex();
+        if (theme == 0)
         {
             return new Color(0.60f, 0.68f, 0.78f, 0.12f);
+        }
+        if (theme == 2)
+        {
+            return new Color(0.18f, 0.64f, 0.34f, 0.16f);
+        }
+        if (theme == 3)
+        {
+            return new Color(0.22f, 0.50f, 1f, 0.16f);
+        }
+        if (theme == 4)
+        {
+            return new Color(0.95f, 0.24f, 0.26f, 0.16f);
+        }
+        if (theme == 5)
+        {
+            return new Color(1f, 0.70f, 0.22f, 0.18f);
         }
         return new Color(0.55f, 0.34f, 1f, 0.16f);
     }
 
     private Color GetRowPulseColor()
     {
-        if (!IsDiscoPurpleTheme())
+        int theme = GetUiThemeIndex();
+        if (theme == 0)
         {
             return new Color(0.60f, 0.68f, 0.78f, 0.18f);
+        }
+        if (theme == 2)
+        {
+            return new Color(0.18f, 0.64f, 0.34f, 0.24f);
+        }
+        if (theme == 3)
+        {
+            return new Color(0.22f, 0.50f, 1f, 0.24f);
+        }
+        if (theme == 4)
+        {
+            return new Color(0.95f, 0.24f, 0.26f, 0.24f);
+        }
+        if (theme == 5)
+        {
+            return new Color(1f, 0.70f, 0.22f, 0.26f);
         }
         return new Color(0.55f, 0.34f, 1f, 0.24f);
     }
@@ -7618,6 +9812,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         ApplySearchFilterRowTheme();
         ApplySearchInputTheme();
         ApplyBrandLogoTheme();
+        ApplyCompanionStatusStyles();
     }
 
 
@@ -7880,6 +10075,267 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         UpdateQueueBadge(true);
         return true;
+    }
+
+
+    private Button CreateQueueMoveHoldButton(string normalIcon, string middleIcon, string readyIcon, int index, int direction, VisualElement row)
+    {
+        Button button = null;
+        button = new Button(() =>
+        {
+            // Normal Button click remains the single-step move.
+            // If a completed hold already moved the item to the edge, skip this click.
+            if (queueHoldMoveSuppressNextClick)
+            {
+                queueHoldMoveSuppressNextClick = false;
+                return;
+            }
+            MoveRealQueueItem(index, direction);
+        });
+        button.tooltip = direction < 0 ? "Move up. Hold to move to top." : "Move down. Hold to move to bottom.";
+        button.AddToClassList("tinyFont");
+        button.style.marginLeft = 4;
+        button.style.marginRight = 4;
+        button.style.flexGrow = 0f;
+        button.style.flexShrink = 0f;
+        AddButtonVisual(button, normalIcon, "tinyFont", 11f, 11f, 6f, 6f, 11f);
+
+        VisualElement fill = new VisualElement();
+        fill.name = "betterJukeboxQueueHoldFill";
+        fill.style.position = Position.Absolute;
+        fill.style.left = new StyleLength(new Length(0, LengthUnit.Pixel));
+        fill.style.top = new StyleLength(new Length(0, LengthUnit.Pixel));
+        fill.style.bottom = new StyleLength(new Length(0, LengthUnit.Pixel));
+        fill.style.width = new StyleLength(new Length(0, LengthUnit.Percent));
+        fill.style.backgroundColor = GetQueueHoldFillColor(0f);
+        fill.style.borderTopLeftRadius = 11f;
+        fill.style.borderTopRightRadius = 11f;
+        fill.style.borderBottomLeftRadius = 11f;
+        fill.style.borderBottomRightRadius = 11f;
+        fill.pickingMode = PickingMode.Ignore;
+        button.Insert(1, fill);
+
+        Label label = GetButtonVisualLabel(button);
+        if (label != null)
+        {
+            label.BringToFront();
+        }
+
+        button.RegisterCallback<PointerDownEvent>(evt =>
+        {
+            if (evt.button == 0)
+            {
+                BeginQueueHoldMove(button, row, index, direction);
+            }
+        }, TrickleDown.TrickleDown);
+
+        button.RegisterCallback<PointerUpEvent>(evt =>
+        {
+            if (evt.button == 0)
+            {
+                EndQueueHoldMove(button, index, direction);
+            }
+        }, TrickleDown.TrickleDown);
+
+        button.RegisterCallback<MouseDownEvent>(evt =>
+        {
+            if (evt.button == 0)
+            {
+                BeginQueueHoldMove(button, row, index, direction);
+            }
+        }, TrickleDown.TrickleDown);
+
+        button.RegisterCallback<MouseUpEvent>(evt =>
+        {
+            if (evt.button == 0)
+            {
+                EndQueueHoldMove(button, index, direction);
+            }
+        }, TrickleDown.TrickleDown);
+
+        button.RegisterCallback<PointerCancelEvent>(evt =>
+        {
+            CancelQueueHoldMove(button);
+        });
+
+        button.RegisterCallback<PointerLeaveEvent>(evt =>
+        {
+            CancelQueueHoldMove(button);
+        });
+
+        RegisterButtonThemeHover(button);
+        return button;
+    }
+
+    private void BeginQueueHoldMove(Button button, VisualElement row, int index, int direction)
+    {
+        if (button == null)
+        {
+            return;
+        }
+
+        // Ignore duplicate MouseDown/PointerDown events for the same press.
+        if (queueHoldMoveButton == button && queueHoldMoveStartedAt >= 0f)
+        {
+            return;
+        }
+
+        queueHoldMoveButton = button;
+        queueHoldMoveRow = row;
+        queueHoldMoveIndex = index;
+        queueHoldMoveDirection = direction;
+        queueHoldMoveStartedAt = Time.unscaledTime;
+        ApplyQueueHoldMoveProgress(button, row, direction, 0f);
+    }
+
+    private void EndQueueHoldMove(Button button, int index, int direction)
+    {
+        if (button == null || button != queueHoldMoveButton)
+        {
+            return;
+        }
+
+        float progress = GetQueueHoldMoveProgress();
+        ResetQueueHoldMoveVisual(button, queueHoldMoveRow);
+        queueHoldMoveButton = null;
+        queueHoldMoveRow = null;
+        queueHoldMoveIndex = -1;
+        queueHoldMoveStartedAt = -1f;
+
+        if (progress >= 1f)
+        {
+            queueHoldMoveSuppressNextClick = true;
+            MoveRealQueueItemToEdge(index, direction);
+        }
+        // Short press is handled by the normal Button click action.
+        // This keeps single-click behavior identical to the old up/down buttons.
+    }
+
+    private void CancelQueueHoldMove(Button button)
+    {
+        if (button == null || button != queueHoldMoveButton)
+        {
+            return;
+        }
+
+        ResetQueueHoldMoveVisual(button, queueHoldMoveRow);
+        queueHoldMoveButton = null;
+        queueHoldMoveRow = null;
+        queueHoldMoveIndex = -1;
+        queueHoldMoveStartedAt = -1f;
+    }
+
+    private void ProcessQueueHoldMoveProgress()
+    {
+        if (queueHoldMoveButton == null || queueHoldMoveStartedAt < 0f)
+        {
+            return;
+        }
+
+        ApplyQueueHoldMoveProgress(queueHoldMoveButton, queueHoldMoveRow, queueHoldMoveDirection, GetQueueHoldMoveProgress());
+    }
+
+    private float GetQueueHoldMoveProgress()
+    {
+        if (queueHoldMoveStartedAt < 0f)
+        {
+            return 0f;
+        }
+
+        float heldSeconds = Time.unscaledTime - queueHoldMoveStartedAt;
+        if (heldSeconds < QueueHoldMoveGraceSeconds)
+        {
+            return 0f;
+        }
+
+        return Mathf.Clamp01((heldSeconds - QueueHoldMoveGraceSeconds) / QueueHoldMoveReadySeconds);
+    }
+
+    private void ApplyQueueHoldMoveProgress(Button button, VisualElement row, int direction, float progress)
+    {
+        if (button == null)
+        {
+            return;
+        }
+
+        VisualElement fill = button.Q("betterJukeboxQueueHoldFill");
+        if (fill != null)
+        {
+            fill.style.width = new StyleLength(new Length(Mathf.Clamp01(progress) * 100f, LengthUnit.Percent));
+            fill.style.backgroundColor = GetQueueHoldFillColor(progress);
+        }
+
+        string icon = direction < 0 ? "↑" : "↓";
+        if (progress >= 1f)
+        {
+            icon = direction < 0 ? "⇈" : "⇊";
+        }
+        else if (progress >= 0.45f)
+        {
+            icon = direction < 0 ? "⇧" : "⇩";
+        }
+        SetButtonVisualText(button, icon);
+
+        Label label = GetButtonVisualLabel(button);
+        if (label != null)
+        {
+            label.style.color = progress >= 1f ? Color.white : GetButtonTextColor();
+        }
+
+        if (row != null)
+        {
+            row.style.backgroundColor = progress >= 1f
+                ? GetRowPulseColor()
+                : new Color(0f, 0f, 0f, 0.25f + (0.20f * Mathf.Clamp01(progress)));
+        }
+    }
+
+    private Color GetQueueHoldFillColor(float progress)
+    {
+        Color accent = GetAccentColor();
+        accent.a = 0.18f + (0.38f * Mathf.Clamp01(progress));
+        return accent;
+    }
+
+    private void ResetQueueHoldMoveVisual(Button button, VisualElement row)
+    {
+        if (button != null)
+        {
+            VisualElement fill = button.Q("betterJukeboxQueueHoldFill");
+            if (fill != null)
+            {
+                fill.style.width = new StyleLength(new Length(0, LengthUnit.Percent));
+            }
+            ApplyButtonNormalStyle(button);
+        }
+
+        if (row != null)
+        {
+            row.style.backgroundColor = GetRowColor();
+        }
+    }
+
+    private void MoveRealQueueItemToEdge(int index, int direction)
+    {
+        List<object> entries = GetRealSongQueueEntries();
+        if (index < 0 || index >= entries.Count || entries.Count <= 1)
+        {
+            return;
+        }
+
+        int targetIndex = direction < 0 ? 0 : entries.Count - 1;
+        if (index == targetIndex)
+        {
+            return;
+        }
+
+        object entry = entries[index];
+        entries.RemoveAt(index);
+        entries.Insert(targetIndex, entry);
+        SetRealSongQueueEntries(entries);
+        MarkQueueChanged();
+        UpdateQueuePanel();
+        UpdateQueueBadge(true);
     }
 
     private void MoveQueueItem(int index, int direction)

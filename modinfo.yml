@@ -1,21 +1,21 @@
 name: Better Jukebox
-version: 1.4.5.14
+version: 1.4.6.14
 description : |
-  BetterJukebox v1.4.5.14 - Hide Lyrics Default Off
+  BetterJukebox v1.4.6.14 - Settings Companion Status Style Match
 
-  - Hide Lyrics is now Off by default for new installs
-  - Existing BetterJukeboxSettings.json values are preserved
-  - Builds on v1.4.5.13 Playlist ESC Step Back Fix
-
-  BetterJukebox v1.4.5.14 - Hide Lyrics Default Off
-
-  - Adds Playlists inside the Search window next to All and Favorites
-  - Adds Playlists.json storage using the same native song id as Favorites
-  - Adds create, rename and delete playlist actions
-  - Adds add-to-playlist from song rows
-  - Adds queue all and shuffle playlist actions
-  - Keeps the main overlay menu unchanged
-  - Builds on v1.4.4.16 Favorites Silent Toggle
+  - Renames Standard theme to DiscoGrey
+  - Keeps DiscoPurple as the default BetterJukebox theme
+  - Adds DiscoGreen, DiscoBlue, DiscoRed and DiscoGold
+  - Cycles all six themes from the Settings panel
+  - Applies the selected theme to panels, borders, buttons, rows, search input and favorite sparkles
+  - Adds a smaller Companion App QR code directly inside the Settings Companion section
+  - Reuses the existing Companion QR data used by the Queue Companion dashboard
+  - Keeps the full Companion dashboard available from Queue
+  - Adds compact Companion status and connected device count in Settings
+  - Does not add new reflection or new Companion lookup logic
+  - Settings Companion status now uses the same emoji icon/text/color style as Queue
+  - Removes the separate Settings-only yellow dot
+  - Builds on v1.4.6.10 Settings Companion Yellow Status Dot
 
 authors:
   - Jimmy Berglund
@@ -27,23 +27,3 @@ requiredTypes:
   - System.Reflection.ParameterInfo
   - System.Security.Cryptography.MD5
   - System.Text.Encoding
-
-
-# v1.4.4.8 - Favorites UX Polish
-# Adds Favorites submenu and Search visual polish.
-# Keeps queue and Companion sync logic unchanged.
-
-# v1.4.4.12 - Compile hotfix for favorite sparkle button capture.
-# Keeps favorite sparkle feedback and gray theme search border refresh.
-
-# v1.4.4.14 - Favorites Animated Sparkle Theme Border Fix
-# Improves favorite sparkle burst style and restores the theme-aware Favorites filter row border.
-
-# v1.4.4.15 - Favorites Sparkle Settings Toggle
-# Adds a setting to enable or disable favorite sparkle animation. Default is off.
-
-# v1.4.4.16 - Favorites Silent Toggle
-# Removes favorite add/remove notifications. Visual star state remains the feedback.
-
-# v1.4.5.8 - Playlist Add Feedback
-# Adds Add to Playlist to History rows and aligns button order with Search.

@@ -3,7 +3,7 @@ using UnityEngine;
 
 public class BetterJukeboxModSettings : IModSettings
 {
-    private const string PersistentSettingsVersion = "1.4.5.14";
+    private const string PersistentSettingsVersion = "1.4.6.2";
     private static bool isLoadingPersistentSettings;
 
     private bool enableBetterJukebox = true;
@@ -23,6 +23,7 @@ public class BetterJukeboxModSettings : IModSettings
     private bool showAlbumArtInSearch = true;
     private bool showAlbumArtInQueue = true;
     private bool showAlbumArtInHistory = true;
+    private bool showAlbumArtInPlaylists = true;
     private bool showNowPlayingQueuePlayerMics = true;
     private bool showFavoriteStars = true;
     private bool showFavoriteSparkleAnimation = false;
@@ -54,6 +55,7 @@ public class BetterJukeboxModSettings : IModSettings
     public bool ShowAlbumArtInSearch { get { return showAlbumArtInSearch; } set { SetBool(ref showAlbumArtInSearch, value); } }
     public bool ShowAlbumArtInQueue { get { return showAlbumArtInQueue; } set { SetBool(ref showAlbumArtInQueue, value); } }
     public bool ShowAlbumArtInHistory { get { return showAlbumArtInHistory; } set { SetBool(ref showAlbumArtInHistory, value); } }
+    public bool ShowAlbumArtInPlaylists { get { return showAlbumArtInPlaylists; } set { SetBool(ref showAlbumArtInPlaylists, value); } }
     public bool ShowNowPlayingQueuePlayerMics { get { return showNowPlayingQueuePlayerMics; } set { SetBool(ref showNowPlayingQueuePlayerMics, value); } }
     public bool ShowFavoriteStars { get { return showFavoriteStars; } set { SetBool(ref showFavoriteStars, value); } }
     public bool ShowFavoriteSparkleAnimation { get { return showFavoriteSparkleAnimation; } set { SetBool(ref showFavoriteSparkleAnimation, value); } }
@@ -130,6 +132,7 @@ public class BetterJukeboxModSettings : IModSettings
                 showAlbumArtInSearch = ReadBool(json, "ShowAlbumArtInSearch", showAlbumArtInSearch);
                 showAlbumArtInQueue = ReadBool(json, "ShowAlbumArtInQueue", showAlbumArtInQueue);
                 showAlbumArtInHistory = ReadBool(json, "ShowAlbumArtInHistory", showAlbumArtInHistory);
+                showAlbumArtInPlaylists = ReadBool(json, "ShowAlbumArtInPlaylists", showAlbumArtInPlaylists);
                 showNowPlayingQueuePlayerMics = ReadBool(json, "ShowNowPlayingQueuePlayerMics", showNowPlayingQueuePlayerMics);
                 showFavoriteStars = ReadBool(json, "ShowFavoriteStars", showFavoriteStars);
                 showFavoriteSparkleAnimation = ReadBool(json, "ShowFavoriteSparkleAnimation", showFavoriteSparkleAnimation);
@@ -182,6 +185,7 @@ public class BetterJukeboxModSettings : IModSettings
             AppendBool(builder, "ShowAlbumArtInSearch", showAlbumArtInSearch, true);
             AppendBool(builder, "ShowAlbumArtInQueue", showAlbumArtInQueue, true);
             AppendBool(builder, "ShowAlbumArtInHistory", showAlbumArtInHistory, true);
+            AppendBool(builder, "ShowAlbumArtInPlaylists", showAlbumArtInPlaylists, true);
             AppendBool(builder, "ShowNowPlayingQueuePlayerMics", showNowPlayingQueuePlayerMics, true);
             AppendBool(builder, "ShowFavoriteStars", showFavoriteStars, true);
             AppendBool(builder, "ShowFavoriteSparkleAnimation", showFavoriteSparkleAnimation, true);
@@ -319,6 +323,7 @@ public class BetterJukeboxModSettings : IModSettings
             new BoolModSettingControl(() => ShowAlbumArtInSearch, newValue => ShowAlbumArtInSearch = newValue) { Label = "Show Album Art In Search" },
             new BoolModSettingControl(() => ShowAlbumArtInQueue, newValue => ShowAlbumArtInQueue = newValue) { Label = "Show Album Art In Queue" },
             new BoolModSettingControl(() => ShowAlbumArtInHistory, newValue => ShowAlbumArtInHistory = newValue) { Label = "Show Album Art In History" },
+            new BoolModSettingControl(() => ShowAlbumArtInPlaylists, newValue => ShowAlbumArtInPlaylists = newValue) { Label = "Show Album Art In Playlists" },
             new BoolModSettingControl(() => ShowMouseOverlay, newValue => ShowMouseOverlay = newValue) { Label = "Show Overlay" },
             new BoolModSettingControl(() => FadeAnimations, newValue => FadeAnimations = newValue) { Label = "Fade In / Fade Out" },
             new BoolModSettingControl(() => AutoHideMenu, newValue => AutoHideMenu = newValue) { Label = "Auto Hide Menu" },
@@ -329,7 +334,7 @@ public class BetterJukeboxModSettings : IModSettings
             new IntModSettingControl(() => NowPlayingSeconds, newValue => NowPlayingSeconds = newValue) { Label = "Now Playing Seconds" },
             new IntModSettingControl(() => OverlayHideSeconds, newValue => OverlayHideSeconds = newValue) { Label = "Overlay Hide Seconds" },
             new IntModSettingControl(() => AnimationSpeed, newValue => AnimationSpeed = newValue) { Label = "Animation Speed (0 Slow, 1 Normal, 2 Fast)" },
-            new IntModSettingControl(() => UiTheme, newValue => UiTheme = newValue) { Label = "UI Theme (0 Standard, 1 DiscoPurple)" },
+            new IntModSettingControl(() => UiTheme, newValue => UiTheme = newValue) { Label = "UI Theme (0 DiscoGrey, 1 DiscoPurple, 2 DiscoGreen, 3 DiscoBlue, 4 DiscoRed, 5 DiscoGold)" },
         };
     }
 }
