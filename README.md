@@ -5,94 +5,178 @@
 <img width="1863" height="1142" alt="Purplebar" src="https://github.com/user-attachments/assets/301e2366-e25d-4bf4-80df-e85fa7c97d3b" />
 <img width="1835" height="1089" alt="Graybar" src="https://github.com/user-attachments/assets/cc02e705-dc35-4b00-bae5-6c267c59a1e5" />
 
-BetterJukebox
-> A premium-quality enhancement for **Melody Mania**, designed to feel
-> like an official feature rather than a mod.
-✨ What's New (v1.4.5.14)
-⭐ Favorites
-``` text
-Search
-┌────────────────────────────────────────────┐
-│ All | ⭐ Favorites | 🎵 Playlists          │
-├────────────────────────────────────────────┤
-│ ★ Queen - Bohemian Rhapsody                │
-│ ☆ ABBA - Waterloo                          │
-│ ★ Europe - Carrie                          │
-└────────────────────────────────────────────┘
-```
-Features: - Permanent favorites - Queue All - Shuffle - Sort A-Z - Sort
-Recently Added - Remove All with double confirmation - Optional sparkle
-animation - Shared Song ID architecture
----
-🎵 Playlists
-``` text
-Playlists
-┌──────────────────────────────────────┐
-│ + New Playlist                       │
-├──────────────────────────────────────┤
-│ 🎵 Party Mix (42)                    │
-│ 🎵 Disney (18)                       │
-│ 🎵 Rock (65)                         │
-└──────────────────────────────────────┘
-```
-Open playlist:
-``` text
-Party Mix
+# 🎵 BetterJukebox
 
-[ Queue All ] [ Shuffle ] [ Rename ] [ Delete ]
+Transform Melody Mania into the ultimate karaoke jukebox experience.
 
-Queen - Don't Stop Me Now
-Europe - Carrie
-ABBA - Waterloo
-```
-Features: - Create playlists - Rename playlists - Delete playlists -
-Queue entire playlist - Shuffle playlist - Add songs from Search - Add
-songs from History
+BetterJukebox extends Melody Mania while preserving its native look and feel. The goal has never been to replace Melody Mania - only to add the features that feel like they should have been there from the beginning.
+
 ---
-⌨ Keyboard Navigation
-``` text
-Playlist
-   ESC
-    │
-    ▼
-Playlist Overview
-   ESC
-    │
-    ▼
-All Songs
-   ESC
-    │
-    ▼
-Close Search
-```
+
+# ✨ Features
+
+## 🔍 Advanced Search
+
+- Instant search
+- Smart Search Tags
+- Search by title, artist and tags
+- Improved keyboard navigation
+- Fast native SongMeta filtering
+- Large library friendly
+
 ---
-🎨 UI Improvements
-Darker search field
-Theme-aware colors
-Favorites toolbar
-Animated confirmation dialogs
-Premium spacing and alignment
+
+## 📋 Queue Management
+
+- Native Melody Mania queue integration
+- Queue Hold
+- Queue counter
+- Improved queue presentation
+- Better song information
+- Queue synchronization with Companion
+
 ---
-⚙ Settings
-Favorite Star Animation (default: Off)
-Hide Lyrics (default: Off)
+
+## ⭐ Favorites *(Coming Soon)*
+
+- Mark songs as favorites
+- Browse favorite songs
+- Queue favorite songs
+- Shuffle favorites
+
 ---
-🏗 Architecture
-BetterJukebox never replaces Melody Mania systems.
-It extends them.
-Native Queue
-Native Song IDs
-Native Playback
-Native DTOs
+
+## 📚 Playlists
+
+- Create playlists
+- Edit playlists
+- Delete playlists
+- Queue entire playlists
+- Playlist management
+- Optional Album Art display
+
 ---
-📦 Current Stable Release
-v1.4.5.14
-Highlights:
-Favorites
-Playlists
-Queue All
-Shuffle
-Persistent storage
-Unified Song ID architecture
-Keyboard navigation improvements
-UI polish
+
+## 📱 Companion
+
+- Native Companion integration
+- QR code for quick connection
+- Device status
+- Connected device counter
+- Queue synchronization
+- Mobile friendly
+
+---
+
+## 🎨 Theme System
+
+Choose your favorite style.
+
+- DiscoGrey
+- DiscoPurple
+- DiscoGreen
+- DiscoBlue
+- DiscoRed
+- DiscoGold
+
+Every theme includes:
+
+- Consistent colors
+- Matching buttons
+- Matching scrollbars
+- Queue styling
+- Search styling
+- Settings styling
+- Progress bars
+- Dialog styling
+
+---
+
+## ☑️ Multi Selection
+
+- Select multiple songs
+- Select All
+- Queue multiple songs
+- Remove multiple songs
+- Improved batch operations
+
+---
+
+## ⚙️ Settings
+
+Customize BetterJukebox your way.
+
+- Theme selection
+- Playlist Album Art toggle
+- Companion settings
+- UI preferences
+
+---
+
+## 🎵 Jukebox Experience
+
+Designed for parties and karaoke nights.
+
+- Better song browsing
+- Cleaner interface
+- Faster navigation
+- Improved usability
+- Consistent UI
+- Keyboard first design
+
+---
+
+## 💎 UI Polish
+
+- Premium spacing
+- Smooth animations
+- Consistent typography
+- Theme-aware interface
+- Native Melody Mania appearance
+
+---
+
+## ⚡ Performance
+
+Built with performance in mind.
+
+- Native SongMeta search
+- Native Queue
+- Native Playback
+- Cached UI
+- Lazy loading
+- Incremental updates
+- No duplicate song database
+
+---
+
+# ❤️ Philosophy
+
+BetterJukebox does **not** replace Melody Mania.
+
+It extends the existing game by reusing Melody Mania's native systems whenever possible.
+
+This ensures:
+
+- Maximum compatibility
+- Better performance
+- Companion compatibility
+- Native queue synchronization
+- Native playback
+- Future-friendly architecture
+
+---
+
+# 🚧 Roadmap
+
+- ⭐ Favorites
+- 📜 History
+- 🎵 Shuffle Playlists
+- 🎨 More Themes
+- ✨ Additional UI polish
+
+---
+
+# ❤️ Built for the Melody Mania community
+
+BetterJukebox is a passion project created to make karaoke nights even better while staying true to the original Melody Mania experience.
