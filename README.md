@@ -1,12 +1,7 @@
-<img width="654" height="654" alt="BetterJukebox" src="https://github.com/user-attachments/assets/c95cd769-3bf2-400c-9398-ba196592738e" />
-<img width="2414" height="1327" alt="New menu" src="https://github.com/user-attachments/assets/29a45b17-5b99-4bc0-a934-157c452e7d5d" />
-<img width="2541" height="1317" alt="Search funktion" src="https://github.com/user-attachments/assets/59cbf854-024d-4479-9500-15b5aab0e22d" />
-<img width="2246" height="1332" alt="Queue" src="https://github.com/user-attachments/assets/214ef1c5-fed0-40b2-901a-f43f2e0260cb" />
-<img width="1863" height="1142" alt="Purplebar" src="https://github.com/user-attachments/assets/301e2366-e25d-4bf4-80df-e85fa7c97d3b" />
-<img width="1835" height="1089" alt="Graybar" src="https://github.com/user-attachments/assets/cc02e705-dc35-4b00-bae5-6c267c59a1e5" />
+
 
 🎵 BetterJukebox
-
+<img width="650" height="650" alt="#BetterJukeboxmini" src="https://github.com/user-attachments/assets/9021e0bd-8f44-43ae-acbf-5dc54ceffbca" />
 Transform Melody Mania into the ultimate karaoke jukebox experience.
 
 BetterJukebox extends Melody Mania while preserving its native look and feel. The goal has never been to replace Melody Mania - only to add the features that feel like they should have been there from the beginning.
@@ -14,6 +9,7 @@ BetterJukebox extends Melody Mania while preserving its native look and feel. Th
 ✨ Features
 
 🔍 Advanced Search
+<img width="2559" height="1365" alt="2 Search funktion" src="https://github.com/user-attachments/assets/9fa982ac-0b99-4989-b1e9-567f48c46fc8" />
 Native SongMetaManager search
 Instant search
 Search by title
@@ -46,7 +42,10 @@ Queue favorite songs
 Shuffle favorites
 Favorites filter
 Native SongMeta integration
+
 📚 Playlists
+<img width="2559" height="1360" alt="7 playlist" src="https://github.com/user-attachments/assets/4e8dcdf8-e190-4ce0-ba5b-2d7e02aff9c3" />
+
 Create playlists
 Edit playlists
 Delete playlists
@@ -60,6 +59,7 @@ Album Art support
 Native SongMeta integration
 
 📜 History
+<img width="2559" height="1362" alt="5 History" src="https://github.com/user-attachments/assets/cad0dbbb-3a57-4b17-b927-4c42984cb151" />
 Recently played songs
 Browse history
 Search history
@@ -76,6 +76,7 @@ Favorite batch operations
 Keyboard friendly
 
 📱 Companion
+<img width="2559" height="1363" alt="3 Companion" src="https://github.com/user-attachments/assets/f17ef49d-682e-4739-b0c8-a82f30d2696f" />
 Native Companion integration
 QR code
 Device status
@@ -86,12 +87,17 @@ Mobile friendly
 🎨 Theme System
 Choose your favorite style.
 DiscoGrey
+<img width="2559" height="1364" alt="8 Graybar" src="https://github.com/user-attachments/assets/fca35908-76b5-4e95-9301-0adaf25d07d8" />
 DiscoPurple
+<img width="2559" height="1364" alt="8 Purplebar" src="https://github.com/user-attachments/assets/6c0ebf62-19ae-4c81-a1a1-057add343df4" />
 DiscoGreen
+<img width="2558" height="1363" alt="8 Greenbar" src="https://github.com/user-attachments/assets/ef7a1e74-5cf2-4280-8de1-83a6d7ec72ab" />
 DiscoBlue
+<img width="2559" height="1364" alt="8 Bluebar" src="https://github.com/user-attachments/assets/4317006c-29ef-42ad-bed6-6491f289ec7e" />
 DiscoRed
+<img width="2559" height="1364" alt="8 Redbar" src="https://github.com/user-attachments/assets/40747d03-4103-41ef-83dc-a11e52d121d8" />
 DiscoGold
-
+<img width="2559" height="1363" alt="8 Gold" src="https://github.com/user-attachments/assets/41680f6d-ee90-4a2e-9ba7-cad18a0a2b1d" />
 Every theme includes:
 
 Consistent colors
