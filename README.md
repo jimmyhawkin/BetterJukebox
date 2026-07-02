@@ -5,184 +5,187 @@
 <img width="1863" height="1142" alt="Purplebar" src="https://github.com/user-attachments/assets/301e2366-e25d-4bf4-80df-e85fa7c97d3b" />
 <img width="1835" height="1089" alt="Graybar" src="https://github.com/user-attachments/assets/cc02e705-dc35-4b00-bae5-6c267c59a1e5" />
 
-# 🎵 BetterJukebox
+🎵 BetterJukebox
 
 Transform Melody Mania into the ultimate karaoke jukebox experience.
 
 BetterJukebox extends Melody Mania while preserving its native look and feel. The goal has never been to replace Melody Mania - only to add the features that feel like they should have been there from the beginning.
 
----
-
-# ✨ Features
-
-## 🔍 Advanced Search
-
-- Instant search
-- Smart Search Tags
-- Search by title, artist and tags
-- Improved keyboard navigation
-- Fast native SongMeta filtering
-- Large library friendly
-
----
-
-## 📋 Queue Management
-
-- Native Melody Mania queue integration
-- Queue Hold
-- Queue counter
-- Improved queue presentation
-- Better song information
-- Queue synchronization with Companion
-
----
-
-## ⭐ Favorites *(Coming Soon)*
-
-- Mark songs as favorites
-- Browse favorite songs
-- Queue favorite songs
-- Shuffle favorites
-
----
-
-## 📚 Playlists
-
-- Create playlists
-- Edit playlists
-- Delete playlists
-- Queue entire playlists
-- Playlist management
-- Optional Album Art display
-
----
-
-## 📱 Companion
-
-- Native Companion integration
-- QR code for quick connection
-- Device status
-- Connected device counter
-- Queue synchronization
-- Mobile friendly
-
----
-
-## 🎨 Theme System
+✨ Features
+🔍 Advanced Search
+Native SongMetaManager search
+Instant search
+Search by title
+Search by artist
+Search by tags
+Large library support
+Keyboard friendly
+Multi-selection aware
+Uses Melody Mania's already loaded SongMeta objects
+No duplicate song database
+No additional song scanning
+📋 Queue Management
+Native Melody Mania Queue
+Queue Hold
+Queue counter
+Queue editing
+Queue synchronization
+Companion synchronization
+Queue All
+Queue Selected
+Batch queue operations
+Better queue presentation
+Better song information
+⭐ Favorites
+Mark songs as favorites
+Browse favorite songs
+Search favorites
+Queue favorite songs
+Shuffle favorites
+Favorites filter
+Native SongMeta integration
+📚 Playlists
+Create playlists
+Edit playlists
+Delete playlists
+Rename playlists
+Search inside playlists
+Queue playlists
+Queue selected songs
+Multi-selection support
+Select All
+Album Art support
+Native SongMeta integration
+📜 History
+Recently played songs
+Browse history
+Search history
+Queue songs from history
+Replay favorite sessions
+☑️ Multi Selection
+Select songs
+Select All
+Queue Selected
+Queue All
+Playlist batch operations
+Favorite batch operations
+Keyboard friendly
+📱 Companion
+Native Companion integration
+QR code
+Device status
+Connected device counter
+Queue synchronization
+Mobile friendly
+🎨 Theme System
 
 Choose your favorite style.
 
-- DiscoGrey
-- DiscoPurple
-- DiscoGreen
-- DiscoBlue
-- DiscoRed
-- DiscoGold
+DiscoGrey
+DiscoPurple
+DiscoGreen
+DiscoBlue
+DiscoRed
+DiscoGold
 
 Every theme includes:
 
-- Consistent colors
-- Matching buttons
-- Matching scrollbars
-- Queue styling
-- Search styling
-- Settings styling
-- Progress bars
-- Dialog styling
-
----
-
-## ☑️ Multi Selection
-
-- Select multiple songs
-- Select All
-- Queue multiple songs
-- Remove multiple songs
-- Improved batch operations
-
----
-
-## ⚙️ Settings
+Consistent colors
+Matching buttons
+Matching scrollbars
+Queue styling
+Playlist styling
+Search styling
+Settings styling
+Dialog styling
+Progress bars
+⚙️ Settings
 
 Customize BetterJukebox your way.
 
-- Theme selection
-- Playlist Album Art toggle
-- Companion settings
-- UI preferences
-
----
-
-## 🎵 Jukebox Experience
+Theme selection
+Album Art toggle
+Companion settings
+UI preferences
+Auto Play options
+Search options
+🎵 Better Jukebox Experience
 
 Designed for parties and karaoke nights.
 
-- Better song browsing
-- Cleaner interface
-- Faster navigation
-- Improved usability
-- Consistent UI
-- Keyboard first design
-
----
-
-## 💎 UI Polish
-
-- Premium spacing
-- Smooth animations
-- Consistent typography
-- Theme-aware interface
-- Native Melody Mania appearance
-
----
-
-## ⚡ Performance
+Better browsing
+Faster navigation
+Cleaner interface
+Better queue management
+Playlist support
+Favorites
+History
+Keyboard-first workflow
+💎 UI Polish
+Native Melody Mania appearance
+Premium spacing
+Consistent typography
+Theme-aware interface
+Smooth animations
+Improved layouts
+Better usability
+⚡ Performance
 
 Built with performance in mind.
 
-- Native SongMeta search
-- Native Queue
-- Native Playback
-- Cached UI
-- Lazy loading
-- Incremental updates
-- No duplicate song database
+Native SongMetaManager search
+Native SongQueueManager
+Native Playback
+Native Preview
+Cached UI
+Lazy loading
+Batch operations
+Incremental updates
+No duplicate song database
+No duplicate queue
+Uses Melody Mania's already loaded SongMeta objects
+❤️ Native Integration
 
----
+BetterJukebox extends Melody Mania instead of replacing it.
 
-# ❤️ Philosophy
+Native systems used:
 
-BetterJukebox does **not** replace Melody Mania.
-
-It extends the existing game by reusing Melody Mania's native systems whenever possible.
+SongMetaManager
+SongQueueManager
+Playback
+Preview
+Companion
+Player Assignment
+Song IDs
 
 This ensures:
 
-- Maximum compatibility
-- Better performance
-- Companion compatibility
-- Native queue synchronization
-- Native playback
-- Future-friendly architecture
+Maximum compatibility
+Better performance
+Native queue synchronization
+Native playback
+Companion compatibility
+Future-friendly architecture
+🚧 Roadmap
+Progressive list rendering
+Virtualized song lists
+Additional themes
+More UI polish
+Additional quality-of-life improvements
+❤️ Philosophy
 
----
+BetterJukebox is built around one simple idea:
 
-# 🚧 Roadmap
+Reuse Melody Mania's native systems whenever possible.
 
-- ⭐ Favorites
-- 📜 History
-- 🎵 Shuffle Playlists
-- 🎨 More Themes
-- ✨ Additional UI polish
+Songs are loaded once by Melody Mania.
 
----
+BetterJukebox works directly with the already loaded SongMeta objects through the native SongMetaManager and uses Melody Mania's real Queue, Playback and Companion systems.
 
-# ❤️ Built for the Melody Mania community
+The goal is not to replace Melody Mania.
 
-BetterJukebox is a passion project created to make karaoke nights even better while staying true to the original Melody Mania experience.
+The goal is to make BetterJukebox feel like it shipped with the game.
 
----
-
-# ❤️ Built for the Melody Mania community
+❤️ Built for the Melody Mania Community
 
 BetterJukebox is a passion project created to make karaoke nights even better while staying true to the original Melody Mania experience.
