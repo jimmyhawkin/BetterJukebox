@@ -12,6 +12,7 @@ Transform Melody Mania into the ultimate karaoke jukebox experience.
 BetterJukebox extends Melody Mania while preserving its native look and feel. The goal has never been to replace Melody Mania - only to add the features that feel like they should have been there from the beginning.
 
 ✨ Features
+
 🔍 Advanced Search
 Native SongMetaManager search
 Instant search
@@ -36,6 +37,7 @@ Queue Selected
 Batch queue operations
 Better queue presentation
 Better song information
+
 ⭐ Favorites
 Mark songs as favorites
 Browse favorite songs
@@ -56,12 +58,14 @@ Multi-selection support
 Select All
 Album Art support
 Native SongMeta integration
+
 📜 History
 Recently played songs
 Browse history
 Search history
 Queue songs from history
 Replay favorite sessions
+
 ☑️ Multi Selection
 Select songs
 Select All
@@ -70,6 +74,7 @@ Queue All
 Playlist batch operations
 Favorite batch operations
 Keyboard friendly
+
 📱 Companion
 Native Companion integration
 QR code
@@ -77,10 +82,9 @@ Device status
 Connected device counter
 Queue synchronization
 Mobile friendly
+
 🎨 Theme System
-
 Choose your favorite style.
-
 DiscoGrey
 DiscoPurple
 DiscoGreen
@@ -99,20 +103,18 @@ Search styling
 Settings styling
 Dialog styling
 Progress bars
+
 ⚙️ Settings
-
 Customize BetterJukebox your way.
-
 Theme selection
 Album Art toggle
 Companion settings
 UI preferences
 Auto Play options
 Search options
+
 🎵 Better Jukebox Experience
-
 Designed for parties and karaoke nights.
-
 Better browsing
 Faster navigation
 Cleaner interface
@@ -121,6 +123,7 @@ Playlist support
 Favorites
 History
 Keyboard-first workflow
+
 💎 UI Polish
 Native Melody Mania appearance
 Premium spacing
@@ -129,10 +132,9 @@ Theme-aware interface
 Smooth animations
 Improved layouts
 Better usability
+
 ⚡ Performance
-
 Built with performance in mind.
-
 Native SongMetaManager search
 Native SongQueueManager
 Native Playback
@@ -143,9 +145,9 @@ Batch operations
 Incremental updates
 No duplicate song database
 No duplicate queue
-Uses Melody Mania's already loaded SongMeta objects
-❤️ Native Integration
+Uses Melody Mania's already loaded SongMeta objecta
 
+❤️ Native Integration
 BetterJukebox extends Melody Mania instead of replacing it.
 
 Native systems used:
@@ -166,12 +168,14 @@ Native queue synchronization
 Native playback
 Companion compatibility
 Future-friendly architecture
+
 🚧 Roadmap
 Progressive list rendering
 Virtualized song lists
 Additional themes
 More UI polish
 Additional quality-of-life improvements
+
 ❤️ Philosophy
 
 BetterJukebox is built around one simple idea:
