@@ -4,11 +4,16 @@ using System.Reflection;
 using UniInject;
 using UniRx;
 using UnityEngine;
+using UnityEngine.UIElements;
 
 public class BetterJukeboxSceneMod : ISceneMod
 {
+    private const string JukeboxModePlayerPrefsKey = "BetterJukebox2_JukeboxModeActive";
+    private static bool jukeboxModeActive;
     private static bool autoStartWasRequested;
     private static bool autoStartWasExecuted;
+    private static bool jukeboxEntryInProgress;
+    private static bool songSelectStartWaitActive;
     private static int lastAutoStartSongCount;
     private static int stableAutoStartSongCountTicks;
 
@@ -18,22 +23,52 @@ public class BetterJukeboxSceneMod : ISceneMod
     [Inject]
     private SongMetaManager songMetaManager;
 
+    [Inject]
+    private SongQueueManager songQueueManager;
+
+    [Inject]
+    private PlaylistManager playlistManager;
+
+    [Inject]
+    private NonPersistentSettings nonPersistentSettings;
+
+    [Inject]
+    private Settings settings;
+
+    [Inject]
+    private VolumeManager volumeManager;
+
+    [Inject]
+    private SceneNavigator sceneNavigator;
+
     public void OnSceneEntered(SceneEnteredContext sceneEnteredContext)
     {
 
         if (sceneEnteredContext.Scene == EScene.MainScene)
         {
+            ExitJukeboxMode();
+            InstallJukeboxMainMenuButton();
             TryAutoStartFromMainScene(sceneEnteredContext);
             return;
         }
 
         if (sceneEnteredContext.Scene == EScene.SongSelectScene)
         {
+            RestoreJukeboxModeMarker();
+            if (jukeboxModeActive)
+            {
+                InstallJukeboxLobby();
+            }
             TryAutoStartFromSongSelectScene(sceneEnteredContext);
             return;
         }
 
-        if (sceneEnteredContext.Scene != EScene.SingScene)
+        if (sceneEnteredContext.Scene == EScene.SingScene)
+        {
+            RestoreJukeboxModeMarker();
+        }
+
+        if (sceneEnteredContext.Scene != EScene.SingScene || !jukeboxModeActive)
         {
             return;
         }
@@ -50,17 +85,291 @@ public class BetterJukeboxSceneMod : ISceneMod
         });
     }
 
-    private void TryAutoStartFromMainScene(SceneEnteredContext sceneEnteredContext)
+
+    private void InstallJukeboxLobby()
     {
-        if (!modSettings.EnableBetterJukebox || !modSettings.AutoOpenSing || !modSettings.AutoStartOnGameStart || autoStartWasExecuted || autoStartWasRequested)
+        AwaitableUtils.ExecuteAfterDelayInFramesAsync(2, () =>
+        {
+            try
+            {
+                UIDocument[] uiDocuments = UnityEngine.Object.FindObjectsOfType<UIDocument>();
+                for (int i = 0; i < uiDocuments.Length; i++)
+                {
+                    UIDocument uiDocument = uiDocuments[i];
+                    if (uiDocument == null || uiDocument.rootVisualElement == null)
+                    {
+                        continue;
+                    }
+
+                    VisualElement root = uiDocument.rootVisualElement;
+                    if (root.Q<VisualElement>("betterJukeboxSongSelectOverlay") != null)
+                    {
+                        return;
+                    }
+
+                    Button nativeStartButton = root.Q<Button>("startButton");
+                    if (nativeStartButton != null)
+                    {
+                        continue;
+                    }
+
+                    GameObject gameObject = new GameObject();
+                    BetterJukeboxControl control = gameObject.AddComponent<BetterJukeboxControl>();
+                    control.name = "BetterJukeboxSongSelectControl";
+                    control.InitializeSongSelectJukeboxMenu(
+                        uiDocument,
+                        modSettings,
+                        songMetaManager,
+                        songQueueManager,
+                        playlistManager,
+                        nonPersistentSettings,
+                        settings,
+                        volumeManager,
+                        sceneNavigator,
+                        OnLobbyPreviousClicked,
+                        OnLobbyNextClicked,
+                        OnLobbyReturnLiveClicked);
+
+                    BetterJukeboxLog.Info("BetterJukebox 2.0.0.24 - Native BetterJukebox menu added to Song Select");
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                BetterJukeboxLog.Exception(ex);
+            }
+        });
+    }
+
+    private void OnLobbyPreviousClicked()
+    {
+        TryStartSpecificSongFromLobby(BetterJukeboxControl.GetPreviousHistorySong());
+    }
+
+    private void OnLobbyReturnLiveClicked()
+    {
+        if (!BetterJukeboxControl.IsBrowsingHistory())
         {
             return;
         }
 
+        // Leave history and resume the live Jukebox flow:
+        // native queue first, random only when the queue is empty.
+        BetterJukeboxControl.GetLiveHistorySong();
+        OnLobbyNextClicked();
+    }
+
+    private void OnLobbyNextClicked()
+    {
+        try
+        {
+            SongMeta historyForwardSong = BetterJukeboxControl.GetNextHistorySong();
+            if (historyForwardSong != null)
+            {
+                TryStartSpecificSongFromLobby(historyForwardSong);
+                return;
+            }
+            if (songSelectStartWaitActive)
+            {
+                return;
+            }
+
+            object songSelectSceneControl = FindControlByName("SongSelectSceneControl");
+            if (songSelectSceneControl == null)
+            {
+                return;
+            }
+
+            songSelectStartWaitActive = true;
+            autoStartWasRequested = true;
+            autoStartWasExecuted = false;
+
+            if (TryStartNextQueuedSong())
+            {
+                return;
+            }
+
+            if (!TryInvokeNoArg(songSelectSceneControl, "SelectRandomSong"))
+            {
+                songSelectStartWaitActive = false;
+                autoStartWasRequested = false;
+                return;
+            }
+
+            WaitForSelectedSongThenStart(songSelectSceneControl, 0);
+        }
+        catch (Exception ex)
+        {
+            BetterJukeboxLog.Exception(ex);
+            ResetJukeboxEntryRequest();
+        }
+    }
+
+    private void InstallJukeboxMainMenuButton()
+    {
+        AwaitableUtils.ExecuteAfterDelayInFramesAsync(1, () =>
+        {
+            try
+            {
+                UIDocument[] uiDocuments = UnityEngine.Object.FindObjectsOfType<UIDocument>();
+                for (int i = 0; i < uiDocuments.Length; i++)
+                {
+                    UIDocument uiDocument = uiDocuments[i];
+                    if (uiDocument == null || uiDocument.rootVisualElement == null)
+                    {
+                        continue;
+                    }
+
+                    VisualElement root = uiDocument.rootVisualElement;
+                    if (root.Q<Button>("betterJukeboxMainMenuButton") != null)
+                    {
+                        return;
+                    }
+
+                    Button startButton = root.Q<Button>("startButton");
+                    if (startButton != null)
+                    {
+                        startButton.clicked += ExitJukeboxMode;
+                    }
+                    VisualElement buttonRow = startButton != null ? startButton.parent : root.Q<VisualElement>("row");
+                    if (buttonRow == null)
+                    {
+                        continue;
+                    }
+
+                    Button jukeboxButton = new Button();
+                    jukeboxButton.name = "betterJukeboxMainMenuButton";
+                    jukeboxButton.text = "Jukebox";
+                    jukeboxButton.AddToClassList("mainSceneButton");
+                    jukeboxButton.AddToClassList("ml-5");
+                    jukeboxButton.style.width = new StyleLength(new Length(160f, LengthUnit.Pixel));
+                    jukeboxButton.style.height = new StyleLength(new Length(60f, LengthUnit.Pixel));
+                    jukeboxButton.style.fontSize = new StyleLength(new Length(18f, LengthUnit.Pixel));
+                    jukeboxButton.clicked += OnJukeboxMainMenuButtonClicked;
+                    buttonRow.Add(jukeboxButton);
+
+                    BetterJukeboxLog.Info("BetterJukebox 2.0.0.24 - Jukebox button added to native main menu row");
+                    return;
+                }
+
+                BetterJukeboxLog.Warning("BetterJukebox 2.0.0.24 - native main menu button row was not found");
+            }
+            catch (Exception ex)
+            {
+                BetterJukeboxLog.Exception(ex);
+            }
+        });
+    }
+
+    private void OnJukeboxMainMenuButtonClicked()
+    {
+        try
+        {
+            BetterJukeboxLog.Info("BetterJukebox 2.0.0.24 - Jukebox button clicked");
+            if (!BeginJukeboxEntry())
+            {
+                BetterJukeboxLog.Info("BetterJukebox 2.0.0.24 - duplicate Jukebox entry request ignored");
+                return;
+            }
+
+            object mainSceneControl = FindControlByName("MainSceneControl");
+            if (mainSceneControl == null)
+            {
+                BetterJukeboxLog.Warning("BetterJukebox 2.0.0.24 - MainSceneControl was not found");
+                ResetJukeboxEntryRequest();
+                return;
+            }
+
+            if (TryInvokeNoArg(mainSceneControl, "OpenSongSelectScene")
+                || TryInvokeNoArg(mainSceneControl, "GoToSongSelectScene"))
+            {
+                BetterJukeboxLog.Info("BetterJukebox 2.0.0.24 - opened native Song Select from Jukebox button");
+                AwaitableUtils.ExecuteAfterDelayInSecondsAsync(1.0f, StartSongSelectWaitOnce);
+                return;
+            }
+
+            BetterJukeboxLog.Warning("BetterJukebox 2.0.0.24 - native Song Select method was not found on MainSceneControl");
+            LogNoArgMethods(mainSceneControl);
+            ResetJukeboxEntryRequest();
+        }
+        catch (Exception ex)
+        {
+            BetterJukeboxLog.Exception(ex);
+            ResetJukeboxEntryRequest();
+        }
+    }
+
+
+    private void EnterJukeboxMode()
+    {
+        jukeboxModeActive = true;
+        PlayerPrefs.SetInt(JukeboxModePlayerPrefsKey, 1);
+        PlayerPrefs.Save();
+    }
+
+    private void ExitJukeboxMode()
+    {
+        jukeboxModeActive = false;
+        PlayerPrefs.SetInt(JukeboxModePlayerPrefsKey, 0);
+        PlayerPrefs.Save();
+    }
+
+    private void RestoreJukeboxModeMarker()
+    {
+        if (!jukeboxModeActive && PlayerPrefs.GetInt(JukeboxModePlayerPrefsKey, 0) == 1)
+        {
+            jukeboxModeActive = true;
+            BetterJukeboxLog.Info("BetterJukebox 2.0.0.24 - restored Jukebox mode marker");
+        }
+    }
+
+    private bool BeginJukeboxEntry()
+    {
+        if (jukeboxEntryInProgress || autoStartWasRequested)
+        {
+            return false;
+        }
+
+        EnterJukeboxMode();
+        jukeboxEntryInProgress = true;
+        autoStartWasExecuted = false;
         autoStartWasRequested = true;
+        songSelectStartWaitActive = false;
+        return true;
+    }
+
+    private void StartSongSelectWaitOnce()
+    {
+        if (!autoStartWasRequested || autoStartWasExecuted || songSelectStartWaitActive)
+        {
+            return;
+        }
+
+        songSelectStartWaitActive = true;
+        WaitForSongSelectReadyThenStart(0);
+    }
+
+    private void ResetJukeboxEntryRequest()
+    {
+        autoStartWasRequested = false;
+        jukeboxEntryInProgress = false;
+        songSelectStartWaitActive = false;
+    }
+
+    private void TryAutoStartFromMainScene(SceneEnteredContext sceneEnteredContext)
+    {
+        if (!modSettings.EnableBetterJukebox || !modSettings.AutoStartJukebox || autoStartWasExecuted || autoStartWasRequested)
+        {
+            return;
+        }
+
+        if (!BeginJukeboxEntry())
+        {
+            return;
+        }
+
         lastAutoStartSongCount = -1;
         stableAutoStartSongCountTicks = 0;
-
         WaitForSongLibraryThenOpenSongSelect(0);
     }
 
@@ -78,7 +387,7 @@ public class BetterJukeboxSceneMod : ISceneMod
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogException(ex);
+                    BetterJukeboxLog.Exception(ex);
                 }
 
                 if (songCount > 0 && songCount == lastAutoStartSongCount)
@@ -98,8 +407,8 @@ public class BetterJukeboxSceneMod : ISceneMod
                 {
                     if (attempt >= 120)
                     {
-                        Debug.LogWarning("BetterJukebox auto start - timed out while waiting for song library");
-                        autoStartWasRequested = false;
+                        BetterJukeboxLog.Warning("BetterJukebox auto start - timed out while waiting for song library");
+                        ResetJukeboxEntryRequest();
                         return;
                     }
 
@@ -112,8 +421,8 @@ public class BetterJukeboxSceneMod : ISceneMod
                 {
                     if (attempt >= 120)
                     {
-                        Debug.LogWarning("BetterJukebox auto start - MainSceneControl not found after waiting");
-                        autoStartWasRequested = false;
+                        BetterJukeboxLog.Warning("BetterJukebox auto start - MainSceneControl not found after waiting");
+                        ResetJukeboxEntryRequest();
                         return;
                     }
 
@@ -126,18 +435,18 @@ public class BetterJukeboxSceneMod : ISceneMod
                 {
                     // Some builds do not fire OnSceneEntered for SongSelectScene when it is opened this way.
                     // Start the SongSelect auto-start wait loop from here as well.
-                    AwaitableUtils.ExecuteAfterDelayInSecondsAsync(1.0f, () => WaitForSongSelectReadyThenStart(0));
+                    AwaitableUtils.ExecuteAfterDelayInSecondsAsync(1.0f, StartSongSelectWaitOnce);
                     return;
                 }
 
-                Debug.LogWarning("BetterJukebox auto start - could not invoke MainSceneControl.OpenSongSelectScene or GoToSongSelectScene");
+                BetterJukeboxLog.Warning("BetterJukebox auto start - could not invoke MainSceneControl.OpenSongSelectScene or GoToSongSelectScene");
                 LogNoArgMethods(mainSceneControl);
-                autoStartWasRequested = false;
+                ResetJukeboxEntryRequest();
             }
             catch (Exception ex)
             {
-                Debug.LogException(ex);
-                autoStartWasRequested = false;
+                BetterJukeboxLog.Exception(ex);
+                ResetJukeboxEntryRequest();
             }
         });
     }
@@ -149,7 +458,7 @@ public class BetterJukeboxSceneMod : ISceneMod
             return;
         }
 
-        WaitForSongSelectReadyThenStart(0);
+        StartSongSelectWaitOnce();
     }
 
     private void WaitForSongSelectReadyThenStart(int attempt)
@@ -167,8 +476,8 @@ public class BetterJukeboxSceneMod : ISceneMod
                         return;
                     }
 
-                    Debug.LogWarning("BetterJukebox auto start - SongSelectSceneControl not found after waiting");
-                    autoStartWasRequested = false;
+                    BetterJukeboxLog.Warning("BetterJukebox auto start - SongSelectSceneControl not found after waiting");
+                    ResetJukeboxEntryRequest();
                     return;
                 }
 
@@ -189,9 +498,9 @@ public class BetterJukeboxSceneMod : ISceneMod
                         return;
                     }
 
-                    Debug.LogWarning("BetterJukebox auto start - timed out while waiting for SongSelectScene to become ready");
+                    BetterJukeboxLog.Warning("BetterJukebox auto start - timed out while waiting for SongSelectScene to become ready");
                     LogNoArgMethods(songSelectSceneControl);
-                    autoStartWasRequested = false;
+                    ResetJukeboxEntryRequest();
                     return;
                 }
 
@@ -204,13 +513,18 @@ public class BetterJukeboxSceneMod : ISceneMod
                 if (!modSettings.AutoPlayRandomSong)
                 {
                     autoStartWasExecuted = true;
-                    autoStartWasRequested = false;
+                    ResetJukeboxEntryRequest();
+                    return;
+                }
+
+                if (TryStartNextQueuedSong())
+                {
                     return;
                 }
 
                 if (!TryInvokeNoArg(songSelectSceneControl, "SelectRandomSong"))
                 {
-                    Debug.LogWarning("BetterJukebox auto start - SelectRandomSong was not found or failed");
+                    BetterJukeboxLog.Warning("BetterJukebox auto start - SelectRandomSong was not found or failed");
                     LogNoArgMethods(songSelectSceneControl);
                 }
 
@@ -218,10 +532,79 @@ public class BetterJukeboxSceneMod : ISceneMod
             }
             catch (Exception ex)
             {
-                Debug.LogException(ex);
-                autoStartWasRequested = false;
+                BetterJukeboxLog.Exception(ex);
+                ResetJukeboxEntryRequest();
             }
         });
+    }
+
+    private void TryStartSpecificSongFromLobby(SongMeta songMeta)
+    {
+        if (songMeta == null)
+        {
+            NotificationManager.CreateNotification(Translation.Of("No song available in history"));
+            return;
+        }
+
+        object songSelectSceneControl = FindControlByName("SongSelectSceneControl");
+        if (songSelectSceneControl == null)
+        {
+            BetterJukeboxLog.Warning("BetterJukebox history navigation - SongSelectSceneControl was not found");
+            return;
+        }
+
+        try
+        {
+            System.Reflection.PropertyInfo property = songSelectSceneControl.GetType().GetProperty("SelectedSong");
+            if (property != null && property.CanWrite)
+            {
+                property.SetValue(songSelectSceneControl, songMeta, null);
+            }
+            else
+            {
+                System.Reflection.FieldInfo field = songSelectSceneControl.GetType().GetField("SelectedSong")
+                    ?? songSelectSceneControl.GetType().GetField("selectedSong", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+                if (field != null)
+                {
+                    field.SetValue(songSelectSceneControl, songMeta);
+                }
+            }
+
+            AwaitableUtils.ExecuteAfterDelayInSecondsAsync(0.2f, () => TryStartSelectedSongFromSongSelect(songSelectSceneControl, 0));
+        }
+        catch (Exception ex)
+        {
+            BetterJukeboxLog.Exception(ex);
+        }
+    }
+
+    private bool TryStartNextQueuedSong()
+    {
+        try
+        {
+            if (songQueueManager == null || songQueueManager.IsSongQueueEmpty)
+            {
+                return false;
+            }
+
+            SingSceneData nextSingSceneData = songQueueManager.CreateNextSingSceneData(null);
+            if (nextSingSceneData == null || nextSingSceneData.SongMetas == null || nextSingSceneData.SongMetas.Count == 0)
+            {
+                BetterJukeboxLog.Warning("BetterJukebox queue-first - native SongQueueManager returned no playable song");
+                return false;
+            }
+
+            autoStartWasExecuted = true;
+            ResetJukeboxEntryRequest();
+            BetterJukeboxLog.Info("BetterJukebox queue-first - starting next native queued song");
+            sceneNavigator.LoadScene(EScene.SingScene, nextSingSceneData);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            BetterJukeboxLog.Warning("BetterJukebox queue-first - native queue start failed: " + ex.Message);
+            return false;
+        }
     }
 
     private void WaitForSelectedSongThenStart(object songSelectSceneControl, int attempt)
@@ -232,7 +615,7 @@ public class BetterJukeboxSceneMod : ISceneMod
             {
                 if (songSelectSceneControl == null)
                 {
-                    autoStartWasRequested = false;
+                    ResetJukeboxEntryRequest();
                     return;
                 }
 
@@ -250,8 +633,8 @@ public class BetterJukeboxSceneMod : ISceneMod
                         return;
                     }
 
-                    Debug.LogWarning("BetterJukebox auto start - timed out waiting for SelectedSong after SelectRandomSong");
-                    autoStartWasRequested = false;
+                    BetterJukeboxLog.Warning("BetterJukebox auto start - timed out waiting for SelectedSong after SelectRandomSong");
+                    ResetJukeboxEntryRequest();
                     return;
                 }
 
@@ -260,8 +643,8 @@ public class BetterJukeboxSceneMod : ISceneMod
             }
             catch (Exception ex)
             {
-                Debug.LogException(ex);
-                autoStartWasRequested = false;
+                BetterJukeboxLog.Exception(ex);
+                ResetJukeboxEntryRequest();
             }
         });
     }
@@ -272,7 +655,7 @@ public class BetterJukeboxSceneMod : ISceneMod
         {
             if (songSelectSceneControl == null)
             {
-                autoStartWasRequested = false;
+                ResetJukeboxEntryRequest();
                 return;
             }
 
@@ -286,7 +669,7 @@ public class BetterJukeboxSceneMod : ISceneMod
                 || TryInvokeNoArg(songSelectSceneControl, "StartSelectedSong"))
             {
                 autoStartWasExecuted = true;
-                autoStartWasRequested = false;
+                ResetJukeboxEntryRequest();
                 return;
             }
 
@@ -296,14 +679,14 @@ public class BetterJukeboxSceneMod : ISceneMod
                 return;
             }
 
-            Debug.LogWarning("BetterJukebox auto start - could not invoke a start-song method");
+            BetterJukeboxLog.Warning("BetterJukebox auto start - could not invoke a start-song method");
             LogNoArgMethods(songSelectSceneControl);
-            autoStartWasRequested = false;
+            ResetJukeboxEntryRequest();
         }
         catch (Exception ex)
         {
-            Debug.LogException(ex);
-            autoStartWasRequested = false;
+            BetterJukeboxLog.Exception(ex);
+            ResetJukeboxEntryRequest();
         }
     }
 
@@ -339,7 +722,7 @@ public class BetterJukeboxSceneMod : ISceneMod
         }
         catch (Exception ex)
         {
-            Debug.LogException(ex);
+            BetterJukeboxLog.Exception(ex);
             return null;
         }
     }
@@ -385,7 +768,7 @@ public class BetterJukeboxSceneMod : ISceneMod
         }
         catch (Exception ex)
         {
-            Debug.LogException(ex);
+            BetterJukeboxLog.Exception(ex);
         }
 
         return 0;

@@ -22,6 +22,8 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
     private readonly static List<BetterJukeboxPlaylist> betterJukeboxPlaylists = new List<BetterJukeboxPlaylist>();
     private static bool betterJukeboxPlaylistsLoaded;
     private static bool showOverlayAfterBetterJukeboxSongChange;
+    private static int betterJukeboxHistoryCursorIndex;
+    private static SongMeta pendingHistoryNavigationSong;
 
     private bool popupVolumeGuardActive;
     private int popupLockedVolumePercent = -1;
@@ -184,6 +186,14 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
     private bool settingsPanelIsVisible;
     private bool forceButtonThemeRefreshOnNextSettingsUpdate;
     private Button queueOverlayButton;
+    private Button historyOverlayButton;
+    private Button nextOverlayButton;
+    private float historyGoLiveHoldStartedAt = -1f;
+    private bool historyGoLiveHoldSuppressNextClick;
+    private float nextGoLiveHoldStartedAt = -1f;
+    private bool nextGoLiveHoldSuppressNextClick;
+    private const float GoLiveHoldActivationSeconds = 0.7f;
+    private const float GoLiveCountdownSeconds = 5f;
     private int lastQueueBadgeCount = -1;
     private int lastRenderedQueueCount = -1;
     private bool queueChangeAnimationPending;
@@ -194,6 +204,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
     private float mouseMovementStartedAt = -1f;
     private float mouseMovementAccumulatedDistance;
     private bool overlayDisabledBySingingMode;
+    private bool persistentSongSelectJukeboxMenu;
     private bool manualSearchInputHandling;
     private bool showOnlyFavoriteSearchResults;
     private bool showOnlyPlaylistSearchResults;
@@ -302,7 +313,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
             }
             catch (Exception ex)
             {
-                Debug.LogException(ex);
+                BetterJukeboxLog.Exception(ex);
             }
         });
     }
@@ -329,7 +340,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
             }
             catch (Exception ex)
             {
-                Debug.LogException(ex);
+                BetterJukeboxLog.Exception(ex);
             }
         });
     }
@@ -719,6 +730,95 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         return false;
     }
 
+    public void InitializeSongSelectJukeboxMenu(
+        UIDocument songSelectUiDocument,
+        BetterJukeboxModSettings songSelectModSettings,
+        SongMetaManager songSelectSongMetaManager,
+        SongQueueManager songSelectSongQueueManager,
+        PlaylistManager songSelectPlaylistManager,
+        NonPersistentSettings songSelectNonPersistentSettings,
+        Settings songSelectSettings,
+        VolumeManager songSelectVolumeManager,
+        SceneNavigator songSelectSceneNavigator,
+        Action previousAction,
+        Action nextAction,
+        Action returnLiveAction)
+    {
+        uiDocument = songSelectUiDocument;
+        modSettings = songSelectModSettings;
+        songMetaManager = songSelectSongMetaManager;
+        songQueueManager = songSelectSongQueueManager;
+        playlistManager = songSelectPlaylistManager;
+        nonPersistentSettings = songSelectNonPersistentSettings;
+        settings = songSelectSettings;
+        volumeManager = songSelectVolumeManager;
+        sceneNavigator = songSelectSceneNavigator;
+        isInjectionFinished = true;
+        persistentSongSelectJukeboxMenu = true;
+
+        if (uiDocument == null || uiDocument.rootVisualElement == null || modSettings == null)
+        {
+            return;
+        }
+
+        if (uiDocument.rootVisualElement.Q<VisualElement>("betterJukeboxSongSelectOverlay") != null)
+        {
+            return;
+        }
+
+        modSettings.EnableBetterJukebox = true;
+        LoadFavoriteSongIds();
+        LoadPlaylists();
+
+        actionOverlay = new VisualElement();
+        actionOverlay.name = "betterJukeboxSongSelectOverlay";
+        actionOverlay.style.position = Position.Absolute;
+        actionOverlay.style.left = new StyleLength(new Length(0, LengthUnit.Pixel));
+        actionOverlay.style.right = new StyleLength(new Length(0, LengthUnit.Pixel));
+        actionOverlay.style.bottom = new StyleLength(new Length(42, LengthUnit.Pixel));
+        actionOverlay.style.flexDirection = FlexDirection.Column;
+        actionOverlay.style.justifyContent = Justify.Center;
+        actionOverlay.style.alignItems = Align.Center;
+        actionOverlay.style.display = DisplayStyle.Flex;
+        actionOverlayIsVisible = true;
+        actionOverlay.focusable = true;
+
+        VisualElement buttonRow = new VisualElement();
+        buttonRow.style.flexDirection = FlexDirection.Row;
+        buttonRow.style.justifyContent = Justify.Center;
+        buttonRow.style.alignItems = Align.Center;
+        buttonRow.style.paddingTop = 10;
+        buttonRow.style.paddingBottom = 10;
+
+        Button previousButton = CreateOverlayIconButton("⏮", previousAction, "Previous song in history");
+        Button nextButton = CreateNextOverlayButton(nextAction, "History forward, then queue or random. Hold to Go Live.");
+        nextOverlayButton = nextButton;
+        Button searchButton = CreateOverlayButton("🔍 Search", ToggleSearchPanel);
+        Button queueButton = CreateOverlayButton("📋 Queue", ToggleQueuePanel);
+        queueOverlayButton = queueButton;
+        UpdateQueueBadge(true);
+        historyOverlayButton = CreateHistoryOverlayButton();
+        Button settingsButton = CreateOverlayIconButton("⚙", ToggleSettingsPanel, "BetterJukebox settings");
+
+        buttonRow.Add(previousButton);
+        buttonRow.Add(nextButton);
+        buttonRow.Add(searchButton);
+        buttonRow.Add(queueButton);
+        buttonRow.Add(historyOverlayButton);
+        buttonRow.Add(settingsButton);
+
+        CreateSearchPanel();
+        CreateQueuePanel();
+        CreateCompanionPanel();
+        CreateHistoryPanel();
+        CreateSettingsPanel();
+        actionOverlay.Add(buttonRow);
+
+        uiDocument.rootVisualElement.Add(actionOverlay);
+        InstallSearchKeyboardBlocker();
+        LogNativeSongMetaSearchReadyOnce();
+    }
+
     private void CreateActionOverlay()
     {
         if (!modSettings.ShowMouseOverlay || uiDocument?.rootVisualElement == null)
@@ -748,14 +848,15 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         buttonRow.style.paddingBottom = 10;
 
         Button singButton = CreateOverlayButton("🎤 Sing!", StartSingingNow);
-        Button previousButton = CreateOverlayIconButton("⏮", StartPreviousSong, "Previous song");
+        Button previousButton = CreateOverlayIconButton("⏮", StartPreviousSong, "Previous song in history");
         Button playPauseButton = CreateOverlayIconButton("⏯", TogglePlayPause, "Pause / play");
-        Button nextButton = CreateOverlayIconButton("⏭", StartNextSong, "Next song");
+        Button nextButton = CreateNextOverlayButton(StartNextSong, "Next song. Hold to Go Live while browsing History.");
+        nextOverlayButton = nextButton;
         Button searchButton = CreateOverlayButton("🔍 Search", ToggleSearchPanel);
         Button queueButton = CreateOverlayButton("📋 Queue", ToggleQueuePanel);
         queueOverlayButton = queueButton;
         UpdateQueueBadge(true);
-        Button historyButton = CreateOverlayButton("🕘 History", ToggleHistoryPanel);
+        historyOverlayButton = CreateHistoryOverlayButton();
         Button settingsButton = CreateOverlayIconButton("⚙", ToggleSettingsPanel, "BetterJukebox settings");
 
         buttonRow.Add(singButton);
@@ -764,7 +865,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         buttonRow.Add(nextButton);
         buttonRow.Add(searchButton);
         buttonRow.Add(queueButton);
-        buttonRow.Add(historyButton);
+        buttonRow.Add(historyOverlayButton);
         buttonRow.Add(settingsButton);
 
         // Popup panels must be added before the button row so they open above the menu.
@@ -777,7 +878,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         actionOverlay.Add(buttonRow);
 
         uiDocument.rootVisualElement.Add(actionOverlay);
-        Debug.Log("BetterJukebox v1.4.5.27 loaded - Native SongMeta Search Cleanup");
+        BetterJukeboxLog.Info("BetterJukebox v2.0.0.24 loaded - History and Next Hold Threshold");
         LogNativeSongMetaSearchReadyOnce();
     }
 
@@ -796,11 +897,11 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
             int count = songMetaManager != null && songMetaManager.GetSongMetas() != null
                 ? songMetaManager.GetSongMetas().Count()
                 : 0;
-            Debug.Log("BetterJukebox Native SongMeta search initialized (" + count + " songs)");
+            BetterJukeboxLog.Info("BetterJukebox Native SongMeta search initialized (" + count + " songs)");
         }
         catch (Exception ex)
         {
-            Debug.LogWarning("BetterJukebox Native SongMeta search initialization count failed: " + ex.Message);
+            BetterJukeboxLog.Warning("BetterJukebox Native SongMeta search initialization count failed: " + ex.Message);
         }
     }
 
@@ -1004,7 +1105,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogException(ex);
+            BetterJukeboxLog.Exception(ex);
         }
     }
 
@@ -1913,7 +2014,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogWarning("BetterJukebox popup layout failed: " + ex.Message);
+            BetterJukeboxLog.Warning("BetterJukebox popup layout failed: " + ex.Message);
         }
     }
 
@@ -1942,7 +2043,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         headerRow.Add(closeButton);
         settingsPanel.Add(headerRow);
 
-        Label version = CreatePanelLabel("Version 1.4.6.13");
+        Label version = CreatePanelLabel("Version 2.0.0.24 History and Next Hold Threshold");
         version.style.color = new Color(1f, 1f, 1f, 0.65f);
         settingsPanel.Add(version);
 
@@ -2008,7 +2109,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogWarning("BetterJukebox settings layout failed: " + ex.Message);
+            BetterJukeboxLog.Warning("BetterJukebox settings layout failed: " + ex.Message);
         }
     }
 
@@ -2146,8 +2247,8 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         AddSettingsCategory(generalSection);
 
         VisualElement playbackSection = CreateSettingsCategory("Playback", "Automatic karaoke playback and queue flow.");
-        playbackSection.Add(CreateSettingsToggle("Auto Open Sing", () => modSettings.AutoOpenSing, value => modSettings.AutoOpenSing = value));
-        playbackSection.Add(CreateSettingsToggle("Auto Play Random Song", () => modSettings.AutoPlayRandomSong, value => modSettings.AutoPlayRandomSong = value));
+        playbackSection.Add(CreateSettingsToggle("Auto Start Jukebox On Game Start", () => modSettings.AutoStartJukebox, value => modSettings.AutoStartJukebox = value));
+        playbackSection.Add(CreateSettingsToggle("Auto Play Random Song When Opening Jukebox", () => modSettings.AutoPlayRandomSong, value => modSettings.AutoPlayRandomSong = value));
         playbackSection.Add(CreateSettingsToggle("Shuffle", () => modSettings.RandomSelection, value => modSettings.RandomSelection = value));
         playbackSection.Add(CreateSettingsToggle("Auto Continue", () => modSettings.AutoContinue, value => modSettings.AutoContinue = value));
         AddSettingsCategory(playbackSection);
@@ -2231,8 +2332,12 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         companionSection.Add(companionQrRow);
         AddSettingsCategory(companionSection);
 
+        VisualElement diagnosticsSection = CreateSettingsCategory("Diagnostics", "Enable detailed logs only while troubleshooting.");
+        diagnosticsSection.Add(CreateSettingsToggle("Debug Logging", () => modSettings.DebugLogging, value => modSettings.DebugLogging = value));
+        AddSettingsCategory(diagnosticsSection);
+
         VisualElement aboutSection = CreateSettingsCategory("About", "Version and mod information.");
-        Label versionInfo = CreatePanelLabel("BetterJukebox 1.4.6.14");
+        Label versionInfo = CreatePanelLabel("BetterJukebox 2.0.0.24 History and Next Hold Threshold");
         versionInfo.style.color = GetAccentHoverColor();
         aboutSection.Add(versionInfo);
         Label disableInfo = CreatePanelLabel("To fully disable BetterJukebox, open Melody Mania > Mods and disable the mod there. This avoids two different enable states.");
@@ -2524,6 +2629,254 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         return button;
     }
 
+    private Button CreateHistoryOverlayButton()
+    {
+        Button button = null;
+        button = CreateOverlayButton(GetHistoryButtonText(), () =>
+        {
+            if (historyGoLiveHoldSuppressNextClick)
+            {
+                historyGoLiveHoldSuppressNextClick = false;
+                return;
+            }
+            ToggleHistoryPanel();
+        });
+        button.tooltip = "Open History. Hold briefly, then keep holding through the countdown to Go Live.";
+
+        button.RegisterCallback<PointerDownEvent>(evt =>
+        {
+            if (evt.button == 0 && IsBrowsingHistory())
+            {
+                historyGoLiveHoldStartedAt = Time.unscaledTime;
+                historyGoLiveHoldSuppressNextClick = false;
+                ShowActionOverlay();
+                lastOverlayActivityTimeInSeconds = Time.unscaledTime;
+            }
+        }, TrickleDown.TrickleDown);
+
+        button.RegisterCallback<PointerUpEvent>(evt =>
+        {
+            if (evt.button == 0)
+            {
+                EndHistoryGoLiveHold();
+            }
+        }, TrickleDown.TrickleDown);
+
+        button.RegisterCallback<PointerCancelEvent>(evt => CancelHistoryGoLiveHold(), TrickleDown.TrickleDown);
+        button.RegisterCallback<PointerLeaveEvent>(evt =>
+        {
+            if (historyGoLiveHoldStartedAt >= 0f)
+            {
+                CancelHistoryGoLiveHold();
+            }
+        }, TrickleDown.TrickleDown);
+        return button;
+    }
+
+    private Button CreateNextOverlayButton(Action clicked, string tooltip)
+    {
+        Button button = null;
+        button = new Button(() =>
+        {
+            PulseClickedButton(button);
+            if (nextGoLiveHoldSuppressNextClick)
+            {
+                nextGoLiveHoldSuppressNextClick = false;
+                return;
+            }
+            if (clicked != null)
+            {
+                clicked();
+            }
+        });
+        button.tooltip = tooltip;
+        button.AddToClassList("smallFont");
+        button.style.marginLeft = 6;
+        button.style.marginRight = 6;
+        button.style.flexGrow = 0f;
+        button.style.flexShrink = 0f;
+        button.style.minWidth = new StyleLength(new Length(54, LengthUnit.Pixel));
+        AddButtonVisual(button, "⏭", "smallFont", 16f, 16f, 10f, 10f, 18f);
+        RegisterButtonThemeHover(button);
+
+        button.RegisterCallback<PointerDownEvent>(evt =>
+        {
+            if (evt.button == 0 && IsBrowsingHistory())
+            {
+                nextGoLiveHoldStartedAt = Time.unscaledTime;
+                nextGoLiveHoldSuppressNextClick = false;
+                ShowActionOverlay();
+                lastOverlayActivityTimeInSeconds = Time.unscaledTime;
+            }
+        }, TrickleDown.TrickleDown);
+
+        button.RegisterCallback<PointerUpEvent>(evt =>
+        {
+            if (evt.button == 0)
+            {
+                EndNextGoLiveHold();
+            }
+        }, TrickleDown.TrickleDown);
+
+        button.RegisterCallback<PointerCancelEvent>(evt => CancelNextGoLiveHold(), TrickleDown.TrickleDown);
+        button.RegisterCallback<PointerLeaveEvent>(evt =>
+        {
+            if (nextGoLiveHoldStartedAt >= 0f)
+            {
+                CancelNextGoLiveHold();
+            }
+        }, TrickleDown.TrickleDown);
+        return button;
+    }
+
+    private void UpdateButtonText(Button button, string text)
+    {
+        if (button == null)
+        {
+            return;
+        }
+
+        Label label = GetButtonVisualLabel(button);
+        if (label != null)
+        {
+            label.text = text;
+        }
+        else
+        {
+            button.text = text;
+        }
+    }
+
+    private void UpdateHistoryButtonText(string text)
+    {
+        UpdateButtonText(historyOverlayButton, text);
+    }
+
+    private void UpdateNextButtonText(string text)
+    {
+        UpdateButtonText(nextOverlayButton, text);
+    }
+
+    private void UpdateGoLiveHolds()
+    {
+        UpdateHistoryGoLiveHold();
+        UpdateNextGoLiveHold();
+    }
+
+    private void UpdateHistoryGoLiveHold()
+    {
+        if (historyGoLiveHoldStartedAt < 0f || historyOverlayButton == null)
+        {
+            return;
+        }
+
+        if (!IsBrowsingHistory())
+        {
+            CancelHistoryGoLiveHold();
+            return;
+        }
+
+        float heldSeconds = Time.unscaledTime - historyGoLiveHoldStartedAt;
+        if (heldSeconds < GoLiveHoldActivationSeconds)
+        {
+            return;
+        }
+
+        historyGoLiveHoldSuppressNextClick = true;
+        float countdownElapsed = heldSeconds - GoLiveHoldActivationSeconds;
+        int secondsLeft = Mathf.Max(1, (int)GoLiveCountdownSeconds - Mathf.FloorToInt(countdownElapsed));
+        UpdateHistoryButtonText("Going Live in " + secondsLeft);
+
+        if (countdownElapsed >= GoLiveCountdownSeconds)
+        {
+            historyGoLiveHoldStartedAt = -1f;
+            historyGoLiveHoldSuppressNextClick = true;
+            UpdateHistoryButtonText("GO LIVE");
+            GoLive();
+        }
+    }
+
+    private void UpdateNextGoLiveHold()
+    {
+        if (nextGoLiveHoldStartedAt < 0f || nextOverlayButton == null)
+        {
+            return;
+        }
+
+        if (!IsBrowsingHistory())
+        {
+            CancelNextGoLiveHold();
+            return;
+        }
+
+        float heldSeconds = Time.unscaledTime - nextGoLiveHoldStartedAt;
+        if (heldSeconds < GoLiveHoldActivationSeconds)
+        {
+            return;
+        }
+
+        nextGoLiveHoldSuppressNextClick = true;
+        float countdownElapsed = heldSeconds - GoLiveHoldActivationSeconds;
+        int secondsLeft = Mathf.Max(1, (int)GoLiveCountdownSeconds - Mathf.FloorToInt(countdownElapsed));
+        UpdateNextButtonText("Going Live in " + secondsLeft);
+
+        if (countdownElapsed >= GoLiveCountdownSeconds)
+        {
+            nextGoLiveHoldStartedAt = -1f;
+            nextGoLiveHoldSuppressNextClick = true;
+            UpdateNextButtonText("GO LIVE");
+            GoLive();
+        }
+    }
+
+    private void EndHistoryGoLiveHold()
+    {
+        if (historyGoLiveHoldStartedAt < 0f)
+        {
+            return;
+        }
+
+        float heldSeconds = Time.unscaledTime - historyGoLiveHoldStartedAt;
+        historyGoLiveHoldStartedAt = -1f;
+        if (heldSeconds >= GoLiveHoldActivationSeconds)
+        {
+            historyGoLiveHoldSuppressNextClick = true;
+        }
+        UpdateHistoryButtonText(GetHistoryButtonText());
+        lastOverlayActivityTimeInSeconds = Time.unscaledTime;
+    }
+
+    private void EndNextGoLiveHold()
+    {
+        if (nextGoLiveHoldStartedAt < 0f)
+        {
+            return;
+        }
+
+        float heldSeconds = Time.unscaledTime - nextGoLiveHoldStartedAt;
+        nextGoLiveHoldStartedAt = -1f;
+        if (heldSeconds >= GoLiveHoldActivationSeconds)
+        {
+            nextGoLiveHoldSuppressNextClick = true;
+        }
+        UpdateNextButtonText("⏭");
+        lastOverlayActivityTimeInSeconds = Time.unscaledTime;
+    }
+
+    private void CancelHistoryGoLiveHold()
+    {
+        historyGoLiveHoldStartedAt = -1f;
+        UpdateHistoryButtonText(GetHistoryButtonText());
+        lastOverlayActivityTimeInSeconds = Time.unscaledTime;
+    }
+
+    private void CancelNextGoLiveHold()
+    {
+        nextGoLiveHoldStartedAt = -1f;
+        UpdateNextButtonText("⏭");
+        lastOverlayActivityTimeInSeconds = Time.unscaledTime;
+    }
+
     private Button CreateOverlayIconButton(string text, Action clicked, string tooltip)
     {
         Button button = null;
@@ -2580,6 +2933,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         ProcessSearchKeyboardInput();
         ProcessQueueHoldMoveProgress();
         ProcessPlaylistHoldMoveProgress();
+        UpdateGoLiveHolds();
         UpdateSkipSong();
         SuppressBuiltInMousePause();
         HideBuiltInPauseButton();
@@ -2875,7 +3229,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogWarning("BetterJukebox Escape handler ignored stale UI reference: " + ex.Message);
+            BetterJukeboxLog.Warning("BetterJukebox Escape handler ignored stale UI reference: " + ex.Message);
             HideAllPopupPanels();
         }
     }
@@ -3225,6 +3579,21 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
             return;
         }
 
+        if (persistentSongSelectJukeboxMenu)
+        {
+            actionOverlayIsVisible = true;
+            actionOverlay.style.display = DisplayStyle.Flex;
+            UnityEngine.Cursor.visible = true;
+            if (settingsPanelIsVisible)
+            {
+                UpdateSettingsPanelLayout();
+            }
+            if (companionPanelIsVisible && companionPanel != null)
+            {
+                UpdatePopupPanelLayout(companionPanel);
+            }
+        }
+
         if (Keyboard.current != null && (Keyboard.current.escapeKey.wasPressedThisFrame || Keyboard.current.escapeKey.wasReleasedThisFrame))
         {
             if (settingsPanelIsVisible)
@@ -3293,6 +3662,23 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
                     mouseMovementAccumulatedDistance = 0f;
                 }
             }
+        }
+
+        if (persistentSongSelectJukeboxMenu)
+        {
+            return;
+        }
+
+        // A Go Live hold is an active interaction. Keep the overlay visible and pause auto-hide.
+        // When the hold ends or is cancelled, the normal timeout restarts from that moment.
+        if (historyGoLiveHoldStartedAt >= 0f || nextGoLiveHoldStartedAt >= 0f)
+        {
+            if (!actionOverlayIsVisible)
+            {
+                ShowActionOverlay();
+            }
+            lastOverlayActivityTimeInSeconds = Time.unscaledTime;
+            return;
         }
 
         // Only auto-hide the small action overlay.
@@ -3370,6 +3756,26 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
     private void HideActionOverlay()
     {
+        if (persistentSongSelectJukeboxMenu)
+        {
+            actionOverlayIsVisible = true;
+            searchPanelIsVisible = false;
+            queuePanelIsVisible = false;
+            companionPanelIsVisible = false;
+            historyPanelIsVisible = false;
+            settingsPanelIsVisible = false;
+            SafeHideElement(searchPanel);
+            SafeHideElement(queuePanel);
+            SafeHideElement(companionPanel);
+            SafeHideElement(historyPanel);
+            SafeHideElement(settingsPanel);
+            if (actionOverlay != null)
+            {
+                actionOverlay.style.display = DisplayStyle.Flex;
+            }
+            return;
+        }
+
         actionOverlayIsVisible = false;
         searchPanelIsVisible = false;
         queuePanelIsVisible = false;
@@ -5584,7 +5990,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         catch (Exception ex)
         {
             betterJukeboxMissingAlbumArtCache.Add(coverPath);
-            Debug.LogWarning($"{nameof(BetterJukeboxControl)} - Could not load album art: {ex.Message}");
+            BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - Could not load album art: {ex.Message}");
             return null;
         }
     }
@@ -5818,7 +6224,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"{nameof(BetterJukeboxControl)} - Could not read real Melody Mania queue: {ex.Message}");
+            BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - Could not read real Melody Mania queue: {ex.Message}");
             queueResultsContainer.Add(CreatePanelLabel("Could not read queue. Check Player.log."));
         }
     }
@@ -5936,7 +6342,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"{nameof(BetterJukeboxControl)} - Failed to format queue entry: {ex.Message}");
+            BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - Failed to format queue entry: {ex.Message}");
         }
 
         return "Queued song";
@@ -6567,7 +6973,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"{nameof(BetterJukeboxControl)} - Could not clone native mic icon UI: {ex.Message}");
+            BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - Could not clone native mic icon UI: {ex.Message}");
             return null;
         }
     }
@@ -6649,7 +7055,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"{nameof(BetterJukeboxControl)} - Failed to read player/mic visual info: {ex.Message}");
+            BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - Failed to read player/mic visual info: {ex.Message}");
         }
         return result;
     }
@@ -6682,7 +7088,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"{nameof(BetterJukeboxControl)} - Could not log MicProfile shape: {ex.Message}");
+            BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - Could not log MicProfile shape: {ex.Message}");
         }
     }
 
@@ -6921,7 +7327,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"{nameof(BetterJukeboxControl)} - Failed to read player/mic queue info: {ex.Message}");
+            BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - Failed to read player/mic queue info: {ex.Message}");
         }
 
         return null;
@@ -8550,7 +8956,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
             if (!System.IO.File.Exists(path))
             {
                 System.IO.File.WriteAllText(path, "[\n]\n");
-                Debug.Log("BetterJukebox favorites file created at " + path);
+                BetterJukeboxLog.Info("BetterJukebox favorites file created at " + path);
             }
         }
         catch (Exception ex)
@@ -8658,7 +9064,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         string primaryId = ids.FirstOrDefault(id => !string.IsNullOrWhiteSpace(id));
         if (string.IsNullOrWhiteSpace(primaryId))
         {
-            Debug.LogWarning("BetterJukebox favorites - could not create favorite id for song");
+            BetterJukeboxLog.Warning("BetterJukebox favorites - could not create favorite id for song");
             NotificationManager.CreateNotification(Translation.Of("Could not add favorite"));
             EnsureFavoritesFileExists();
             return;
@@ -8687,7 +9093,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         NormalizeLoadedFavoriteSongIds();
         SaveFavoriteSongIds();
-        Debug.Log("BetterJukebox favorites - " + (added ? "added" : "removed") + " id '" + primaryId + "' at " + GetFavoritesPath());
+        BetterJukeboxLog.Info("BetterJukebox favorites - " + (added ? "added" : "removed") + " id '" + primaryId + "' at " + GetFavoritesPath());
         string songName = songMeta != null ? songMeta.GetArtistDashTitle() : "song";
         // Favorite toggle is silent. The filled star and optional sparkle animation provide feedback.
         RefreshFavoriteViews();
@@ -8850,7 +9256,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogWarning("BetterJukebox could not normalize favorites: " + ex.Message);
+            BetterJukeboxLog.Warning("BetterJukebox could not normalize favorites: " + ex.Message);
         }
     }
 
@@ -9039,7 +9445,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogWarning("BetterJukebox favorite sparkle ignored: " + ex.Message);
+            BetterJukeboxLog.Warning("BetterJukebox favorite sparkle ignored: " + ex.Message);
         }
     }
 
@@ -9231,6 +9637,15 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
 
         historyResultsContainer.Clear();
+
+        if (IsBrowsingHistory())
+        {
+            VisualElement liveActions = CreatePanelRow();
+            liveActions.style.justifyContent = Justify.Center;
+            liveActions.style.marginBottom = 8f;
+            liveActions.Add(CreateSmallPanelButton("Go Live", GoLive));
+            historyResultsContainer.Add(liveActions);
+        }
 
         if (betterJukeboxHistory.Count == 0)
         {
@@ -9999,7 +10414,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogException(ex);
+            BetterJukeboxLog.Exception(ex);
         }
     }
 
@@ -10010,8 +10425,15 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
             return;
         }
 
+        if (pendingHistoryNavigationSong == songMeta)
+        {
+            pendingHistoryNavigationSong = null;
+            return;
+        }
+
         betterJukeboxHistory.Remove(songMeta);
         betterJukeboxHistory.Insert(0, songMeta);
+        betterJukeboxHistoryCursorIndex = 0;
         while (betterJukeboxHistory.Count > 50)
         {
             betterJukeboxHistory.RemoveAt(betterJukeboxHistory.Count - 1);
@@ -10503,7 +10925,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"{nameof(BetterJukeboxControl)} - Failed to invoke {methodName}: {ex.Message}");
+                    BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - Failed to invoke {methodName}: {ex.Message}");
                 }
             }
         }
@@ -10540,7 +10962,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"{nameof(BetterJukeboxControl)} - Failed to add real queue entry via {methodInfo}: {ex.Message}");
+                BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - Failed to add real queue entry via {methodInfo}: {ex.Message}");
             }
         }
         return false;
@@ -10613,7 +11035,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"{nameof(BetterJukeboxControl)} - Could not construct queue DTO of type {parameterType.FullName}: {ex.Message}");
+            BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - Could not construct queue DTO of type {parameterType.FullName}: {ex.Message}");
             dto = null;
         }
 
@@ -10700,7 +11122,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"{nameof(BetterJukeboxControl)} - Could not create SingSceneDataDto for queue entry: {ex.Message}");
+                BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - Could not create SingSceneDataDto for queue entry: {ex.Message}");
             }
         }
 
@@ -10716,7 +11138,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         else
         {
-            Debug.LogWarning($"{nameof(BetterJukeboxControl)} - Could not attach current SingScenePlayerDataDto to PC queue entry");
+            BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - Could not attach current SingScenePlayerDataDto to PC queue entry");
         }
 
         TrySetMemberValue(dto, "SongMeta", songMeta);
@@ -10761,7 +11183,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"{nameof(BetterJukeboxControl)} - Could not create nested DTO {memberName}: {ex.Message}");
+            BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - Could not create nested DTO {memberName}: {ex.Message}");
             return null;
         }
     }
@@ -10792,7 +11214,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"{nameof(BetterJukeboxControl)} - Could not create current SingScenePlayerDataDto: {ex.Message}");
+            BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - Could not create current SingScenePlayerDataDto: {ex.Message}");
             return null;
         }
     }
@@ -10891,7 +11313,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"{nameof(BetterJukeboxControl)} - Could not create md5 hash: {ex.Message}");
+            BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - Could not create md5 hash: {ex.Message}");
             return "";
         }
     }
@@ -10991,7 +11413,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"{nameof(BetterJukeboxControl)} - DumpSongMetaForPcQueue failed: {ex.Message}");
+            BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - DumpSongMetaForPcQueue failed: {ex.Message}");
         }
     }
 
@@ -11022,7 +11444,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"{nameof(BetterJukeboxControl)} - DumpSongMetaManagerForPcQueue failed: {ex.Message}");
+            BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - DumpSongMetaManagerForPcQueue failed: {ex.Message}");
         }
     }
 
@@ -11201,7 +11623,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"{nameof(BetterJukeboxControl)} - DumpRealQueueEntries failed: {ex.Message}");
+            BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - DumpRealQueueEntries failed: {ex.Message}");
         }
     }
 
@@ -11219,7 +11641,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"{nameof(BetterJukeboxControl)} - DumpQueueObject failed for {context}: {ex.Message}");
+            BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - DumpQueueObject failed for {context}: {ex.Message}");
         }
     }
 
@@ -11297,7 +11719,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"{nameof(BetterJukeboxControl)} - DumpQueueObjectDeep failed for {context}: {ex.Message}");
+            BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - DumpQueueObjectDeep failed for {context}: {ex.Message}");
         }
     }
 
@@ -11352,7 +11774,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogException(ex);
+            BetterJukeboxLog.Exception(ex);
         }
     }
 
@@ -11416,7 +11838,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogException(ex);
+            BetterJukeboxLog.Exception(ex);
         }
     }
 
@@ -11477,7 +11899,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogException(ex);
+            BetterJukeboxLog.Exception(ex);
         }
     }
 
@@ -11496,7 +11918,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogException(ex);
+            BetterJukeboxLog.Exception(ex);
         }
     }
 
@@ -11532,7 +11954,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogException(ex);
+            BetterJukeboxLog.Exception(ex);
         }
     }
 
@@ -11577,7 +11999,13 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
     private void UpdateFinishingScene()
     {
-        if (isFinishing || singingModeStarted || !modSettings.AutoContinue)
+        // Song Select reuses BetterJukeboxControl for the persistent Jukebox menu,
+        // but there is no active SongAudioPlayer in that scene.
+        if (persistentSongSelectJukeboxMenu
+            || songAudioPlayer == null
+            || isFinishing
+            || singingModeStarted
+            || !modSettings.AutoContinue)
         {
             return;
         }
@@ -11615,31 +12043,127 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         singingUiElements.ForEach(element => AnimationUtils.FadeOutVisualElement(gameObject, element, 1f));
     }
 
+    public static bool IsBrowsingHistory()
+    {
+        return betterJukeboxHistoryCursorIndex > 0 && betterJukeboxHistory.Count > 0;
+    }
+
+    public static string GetHistoryButtonText()
+    {
+        int historyCount = betterJukeboxHistory.Count;
+        if (historyCount <= 0)
+        {
+            return "🕘 History";
+        }
+
+        if (!IsBrowsingHistory())
+        {
+            return "🕘 History • " + historyCount;
+        }
+
+        int chronologicalPosition = historyCount - betterJukeboxHistoryCursorIndex;
+        return "🕘 History " + chronologicalPosition + "/" + historyCount;
+    }
+
+    public static SongMeta GetPreviousHistorySong()
+    {
+        if (betterJukeboxHistory.Count < 2)
+        {
+            return null;
+        }
+
+        if (betterJukeboxHistoryCursorIndex < betterJukeboxHistory.Count - 1)
+        {
+            betterJukeboxHistoryCursorIndex++;
+        }
+
+        return betterJukeboxHistory[betterJukeboxHistoryCursorIndex];
+    }
+
+    public static SongMeta GetNextHistorySong()
+    {
+        if (!IsBrowsingHistory())
+        {
+            return null;
+        }
+
+        betterJukeboxHistoryCursorIndex--;
+        return betterJukeboxHistory[betterJukeboxHistoryCursorIndex];
+    }
+
+    public static SongMeta GetLiveHistorySong()
+    {
+        if (betterJukeboxHistory.Count == 0)
+        {
+            return null;
+        }
+
+        betterJukeboxHistoryCursorIndex = 0;
+        return betterJukeboxHistory[0];
+    }
+
+    private void LoadHistorySong(SongMeta songMeta)
+    {
+        if (songMeta == null)
+        {
+            return;
+        }
+
+        pendingHistoryNavigationSong = songMeta;
+        PrepareBetterJukeboxUiForSceneTransition();
+        RequestKeepActionOverlayAfterSongChange();
+
+        SingSceneData currentSingSceneData = SceneNavigator.GetSceneDataOrThrow<SingSceneData>();
+        SingSceneData nextSingSceneData = new SingSceneData();
+        nextSingSceneData.SingScenePlayerData = currentSingSceneData.SingScenePlayerData;
+        nextSingSceneData.gameRoundSettings = currentSingSceneData.gameRoundSettings;
+        nextSingSceneData.SongMetas = new List<SongMeta>() { songMeta };
+        sceneNavigator.LoadScene(EScene.SingScene, nextSingSceneData);
+    }
+
     public void StartPreviousSong()
     {
         try
         {
-            SingSceneData currentSingSceneData = SceneNavigator.GetSceneDataOrThrow<SingSceneData>();
-            SongMeta currentSongMeta = currentSingSceneData.SongMetas.FirstOrDefault();
-
-            SongMeta previousSongMeta = betterJukeboxHistory
-                .Where(songMeta => songMeta != null && songMeta != currentSongMeta)
-                .FirstOrDefault();
-
+            SongMeta previousSongMeta = GetPreviousHistorySong();
             if (previousSongMeta == null)
             {
                 NotificationManager.CreateNotification(Translation.Of("No previous song in history"));
                 return;
             }
 
-            PrepareBetterJukeboxUiForSceneTransition();
-            RequestKeepActionOverlayAfterSongChange();
-            LoadSong(previousSongMeta);
+            LoadHistorySong(previousSongMeta);
         }
         catch (Exception ex)
         {
-            Debug.LogException(ex);
+            BetterJukeboxLog.Exception(ex);
         }
+    }
+
+    public void GoLive()
+    {
+        try
+        {
+            if (!IsBrowsingHistory())
+            {
+                return;
+            }
+
+            // Both History hold and the History panel Go Live button use this exact path.
+            // Leave history, then continue the live Jukebox flow: native queue first, random fallback.
+            betterJukeboxHistoryCursorIndex = 0;
+            UpdateHistoryButtonText(GetHistoryButtonText());
+            StartNextSong();
+        }
+        catch (Exception ex)
+        {
+            BetterJukeboxLog.Exception(ex);
+        }
+    }
+
+    public void ReturnToLiveHistorySong()
+    {
+        GoLive();
     }
 
     public void TogglePlayPause()
@@ -11679,7 +12203,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogException(ex);
+            BetterJukeboxLog.Exception(ex);
         }
     }
 
@@ -11710,13 +12234,13 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogException(ex);
+                    BetterJukeboxLog.Exception(ex);
                 }
             });
         }
         catch (Exception ex)
         {
-            Debug.LogException(ex);
+            BetterJukeboxLog.Exception(ex);
         }
     }
 
@@ -11733,7 +12257,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
             }
             catch (Exception ex)
             {
-                Debug.LogException(ex);
+                BetterJukeboxLog.Exception(ex);
             }
         });
     }
@@ -11806,7 +12330,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogException(ex);
+            BetterJukeboxLog.Exception(ex);
             return false;
         }
     }
@@ -11861,6 +12385,13 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
     public void StartNextSong()
     {
+        SongMeta historyForwardSong = GetNextHistorySong();
+        if (historyForwardSong != null)
+        {
+            LoadHistorySong(historyForwardSong);
+            return;
+        }
+
         SingSceneData currentSingSceneData = SceneNavigator.GetSceneDataOrThrow<SingSceneData>();
         SongMeta currentSongMeta = currentSingSceneData.SongMetas.FirstOrDefault();
         seenSongMetas.Add(currentSongMeta);
@@ -11893,16 +12424,16 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
     private SongMeta GetNextSongMeta(SongMeta currentSongMeta)
     {
-        SongMeta nextBetterJukeboxQueueSongMeta = GetNextBetterJukeboxQueueSongMeta();
-        if (nextBetterJukeboxQueueSongMeta != null)
-        {
-            return nextBetterJukeboxQueueSongMeta;
-        }
-
         SongMeta nextSongQueueSongMeta = GetNextSongQueueSongMeta();
         if (nextSongQueueSongMeta != null)
         {
             return nextSongQueueSongMeta;
+        }
+
+        SongMeta nextBetterJukeboxQueueSongMeta = GetNextBetterJukeboxQueueSongMeta();
+        if (nextBetterJukeboxQueueSongMeta != null)
+        {
+            return nextBetterJukeboxQueueSongMeta;
         }
 
         List<SongMeta> allSelectableSongMetas = GetAllSelectableSongMetas();
@@ -11964,12 +12495,12 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
                     return nativeNextSongMeta;
                 }
 
-                Debug.LogWarning($"{nameof(BetterJukeboxControl)} - Native SongQueueManager returned no next song. Trying BetterJukebox queue-entry fallback.");
+                BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - Native SongQueueManager returned no next song. Trying BetterJukebox queue-entry fallback.");
             }
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"{nameof(BetterJukeboxControl)} - Native SongQueueManager next-song failed: {ex.Message}. Trying BetterJukebox queue-entry fallback.");
+            BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - Native SongQueueManager next-song failed: {ex.Message}. Trying BetterJukebox queue-entry fallback.");
         }
 
         return GetNextSongQueueSongMetaByReadingFirstQueueEntry();
@@ -11997,7 +12528,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"{nameof(BetterJukeboxControl)} - PC queue-entry override failed: {ex.Message}");
+            BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - PC queue-entry override failed: {ex.Message}");
             return null;
         }
     }
@@ -12016,7 +12547,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
             SongMeta songMeta = FindSongMetaForQueueEntry(firstEntry);
             if (songMeta == null)
             {
-                Debug.LogWarning($"{nameof(BetterJukeboxControl)} - Could not resolve first queue entry to SongMeta. Entry type: {firstEntry?.GetType().FullName}");
+                BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - Could not resolve first queue entry to SongMeta. Entry type: {firstEntry?.GetType().FullName}");
                 return null;
             }
 
@@ -12025,7 +12556,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"{nameof(BetterJukeboxControl)} - Queue-entry fallback failed: {ex.Message}");
+            BetterJukeboxLog.Warning($"{nameof(BetterJukeboxControl)} - Queue-entry fallback failed: {ex.Message}");
             return null;
         }
     }
@@ -12082,7 +12613,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogException(ex);
+            BetterJukeboxLog.Exception(ex);
             Debug.LogError($"{nameof(BetterJukeboxControl)} - Failed to disable SingSceneFinisher");
         }
     }
@@ -12102,7 +12633,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
         catch (Exception ex)
         {
-            Debug.LogException(ex);
+            BetterJukeboxLog.Exception(ex);
             Debug.LogError($"{nameof(BetterJukeboxControl)} - Failed to enable SingSceneFinisher");
         }
     }

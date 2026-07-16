@@ -1,21 +1,23 @@
 name: Better Jukebox
-version: 1.4.6.14
+version: 2.0.0.24
 description : |
-  BetterJukebox v1.4.6.14 - Settings Companion Status Style Match
+  BetterJukebox v2.0.0.24 - History and Next Hold Threshold
 
-  - Renames Standard theme to DiscoGrey
-  - Keeps DiscoPurple as the default BetterJukebox theme
-  - Adds DiscoGreen, DiscoBlue, DiscoRed and DiscoGold
-  - Cycles all six themes from the Settings panel
-  - Applies the selected theme to panels, borders, buttons, rows, search input and favorite sparkles
-  - Adds a smaller Companion App QR code directly inside the Settings Companion section
-  - Reuses the existing Companion QR data used by the Queue Companion dashboard
-  - Keeps the full Companion dashboard available from Queue
-  - Adds compact Companion status and connected device count in Settings
-  - Does not add new reflection or new Companion lookup logic
-  - Settings Companion status now uses the same emoji icon/text/color style as Queue
-  - Removes the separate Settings-only yellow dot
-  - Builds on v1.4.6.10 Settings Companion Yellow Status Dot
+  - Replaces the temporary Song Select lobby design
+  - Uses BetterJukebox's existing overlay button builders and theme styling
+  - Shows only Next, Search, Queue, History and Settings in Jukebox Song Select
+  - Opens the real BetterJukebox Search, Queue, History and Settings panels
+  - Next starts the first native queued song when available
+  - Random song selection is used only when the native queue is empty
+  - Song Select Jukebox menu remains permanently visible
+  - Menu appears only after entering through Jukebox
+  - Entering through Sing never creates BetterJukebox UI or automation
+  - Auto Play on Jukebox entry also prioritizes the native queue
+  - Auto Continue prioritizes the native queue before random fallback
+  - Native SongQueueManager remains the single queue owner
+  - Routine diagnostic logging is disabled by default
+  - Debug Logging can be enabled from BetterJukebox Settings
+  - History hold and History panel Go Live use one shared Queue-first / Random-fallback path
 
 authors:
   - Jimmy Berglund
@@ -24,6 +26,8 @@ requiredTypes:
   - System.Reflection.MethodInfo
   - System.Reflection.BindingFlags
   - System.Reflection.PropertyInfo
+  - System.Reflection.FieldInfo
   - System.Reflection.ParameterInfo
   - System.Security.Cryptography.MD5
   - System.Text.Encoding
+

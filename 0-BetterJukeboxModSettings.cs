@@ -3,11 +3,11 @@ using UnityEngine;
 
 public class BetterJukeboxModSettings : IModSettings
 {
-    private const string PersistentSettingsVersion = "1.4.6.2";
+    private const string PersistentSettingsVersion = "2.0.0.24";
     private static bool isLoadingPersistentSettings;
 
     private bool enableBetterJukebox = true;
-    private bool autoOpenSing = true;
+    private bool autoStartJukebox = false;
     private bool autoPlayRandomSong = true;
     private bool fadeAnimations = true;
     private bool autoHideMenu = true;
@@ -20,7 +20,7 @@ public class BetterJukeboxModSettings : IModSettings
     private bool showNowPlaying = true;
     private bool showMouseOverlay = true;
     private bool showProgressBar = false;
-    private bool showAlbumArtInSearch = true;
+    private bool showAlbumArtInSearch = false;
     private bool showAlbumArtInQueue = true;
     private bool showAlbumArtInHistory = true;
     private bool showAlbumArtInPlaylists = true;
@@ -29,9 +29,10 @@ public class BetterJukeboxModSettings : IModSettings
     private bool showFavoriteSparkleAnimation = false;
     private bool autoStartOnGameStart = true;
     private bool hideBuiltInPauseButton = true;
+    private bool debugLogging = false;
     private int nowPlayingSeconds = 6;
     private int overlayHideSeconds = 4;
-    private int uiTheme = 1;
+    private int uiTheme = 0;
 
     public BetterJukeboxModSettings()
     {
@@ -39,7 +40,7 @@ public class BetterJukeboxModSettings : IModSettings
     }
 
     public bool EnableBetterJukebox { get { return enableBetterJukebox; } set { SetBool(ref enableBetterJukebox, value); } }
-    public bool AutoOpenSing { get { return autoOpenSing; } set { SetBool(ref autoOpenSing, value); } }
+    public bool AutoStartJukebox { get { return autoStartJukebox; } set { SetBool(ref autoStartJukebox, value); } }
     public bool AutoPlayRandomSong { get { return autoPlayRandomSong; } set { SetBool(ref autoPlayRandomSong, value); } }
     public bool FadeAnimations { get { return fadeAnimations; } set { SetBool(ref fadeAnimations, value); } }
     public bool AutoHideMenu { get { return autoHideMenu; } set { SetBool(ref autoHideMenu, value); } }
@@ -61,6 +62,7 @@ public class BetterJukeboxModSettings : IModSettings
     public bool ShowFavoriteSparkleAnimation { get { return showFavoriteSparkleAnimation; } set { SetBool(ref showFavoriteSparkleAnimation, value); } }
     public bool AutoStartOnGameStart { get { return autoStartOnGameStart; } set { SetBool(ref autoStartOnGameStart, value); } }
     public bool HideBuiltInPauseButton { get { return hideBuiltInPauseButton; } set { SetBool(ref hideBuiltInPauseButton, value); } }
+    public bool DebugLogging { get { return debugLogging; } set { SetBool(ref debugLogging, value); BetterJukeboxLog.Enabled = value; } }
     public int NowPlayingSeconds { get { return nowPlayingSeconds; } set { SetInt(ref nowPlayingSeconds, value); } }
     public int OverlayHideSeconds { get { return overlayHideSeconds; } set { SetInt(ref overlayHideSeconds, value); } }
     public int UiTheme { get { return uiTheme; } set { SetInt(ref uiTheme, value); } }
@@ -116,7 +118,7 @@ public class BetterJukeboxModSettings : IModSettings
                 string json = System.IO.File.ReadAllText(path);
 
                 enableBetterJukebox = ReadBool(json, "EnableBetterJukebox", enableBetterJukebox);
-                autoOpenSing = ReadBool(json, "AutoOpenSing", autoOpenSing);
+                autoStartJukebox = ReadBool(json, "AutoStartJukebox", autoStartJukebox);
                 autoPlayRandomSong = ReadBool(json, "AutoPlayRandomSong", autoPlayRandomSong);
                 fadeAnimations = ReadBool(json, "FadeAnimations", fadeAnimations);
                 autoHideMenu = ReadBool(json, "AutoHideMenu", autoHideMenu);
@@ -138,6 +140,7 @@ public class BetterJukeboxModSettings : IModSettings
                 showFavoriteSparkleAnimation = ReadBool(json, "ShowFavoriteSparkleAnimation", showFavoriteSparkleAnimation);
                 autoStartOnGameStart = ReadBool(json, "AutoStartOnGameStart", autoStartOnGameStart);
                 hideBuiltInPauseButton = ReadBool(json, "HideBuiltInPauseButton", hideBuiltInPauseButton);
+                debugLogging = ReadBool(json, "DebugLogging", debugLogging);
                 nowPlayingSeconds = ReadInt(json, "NowPlayingSeconds", nowPlayingSeconds);
                 overlayHideSeconds = ReadInt(json, "OverlayHideSeconds", overlayHideSeconds);
                 uiTheme = ReadInt(json, "UiTheme", uiTheme);
@@ -152,6 +155,7 @@ public class BetterJukeboxModSettings : IModSettings
             isLoadingPersistentSettings = false;
         }
 
+        BetterJukeboxLog.Enabled = debugLogging;
         SavePersistentSettings();
     }
 
@@ -169,7 +173,7 @@ public class BetterJukeboxModSettings : IModSettings
             builder.AppendLine("{");
             AppendString(builder, "Version", PersistentSettingsVersion, true);
             AppendBool(builder, "EnableBetterJukebox", enableBetterJukebox, true);
-            AppendBool(builder, "AutoOpenSing", autoOpenSing, true);
+            AppendBool(builder, "AutoStartJukebox", autoStartJukebox, true);
             AppendBool(builder, "AutoPlayRandomSong", autoPlayRandomSong, true);
             AppendBool(builder, "FadeAnimations", fadeAnimations, true);
             AppendBool(builder, "AutoHideMenu", autoHideMenu, true);
@@ -191,6 +195,7 @@ public class BetterJukeboxModSettings : IModSettings
             AppendBool(builder, "ShowFavoriteSparkleAnimation", showFavoriteSparkleAnimation, true);
             AppendBool(builder, "AutoStartOnGameStart", autoStartOnGameStart, true);
             AppendBool(builder, "HideBuiltInPauseButton", hideBuiltInPauseButton, true);
+            AppendBool(builder, "DebugLogging", debugLogging, true);
             AppendInt(builder, "NowPlayingSeconds", nowPlayingSeconds, true);
             AppendInt(builder, "OverlayHideSeconds", overlayHideSeconds, true);
             AppendInt(builder, "UiTheme", uiTheme, false);
@@ -311,8 +316,8 @@ public class BetterJukeboxModSettings : IModSettings
         return new List<IModSettingControl>()
         {
             new BoolModSettingControl(() => EnableBetterJukebox, newValue => EnableBetterJukebox = newValue) { Label = "Enable BetterJukebox" },
-            new BoolModSettingControl(() => AutoOpenSing, newValue => AutoOpenSing = newValue) { Label = "Auto Open Sing" },
-            new BoolModSettingControl(() => AutoPlayRandomSong, newValue => AutoPlayRandomSong = newValue) { Label = "Auto Play Random Song" },
+            new BoolModSettingControl(() => AutoStartJukebox, newValue => AutoStartJukebox = newValue) { Label = "Auto Start Jukebox On Game Start" },
+            new BoolModSettingControl(() => AutoPlayRandomSong, newValue => AutoPlayRandomSong = newValue) { Label = "Auto Play Random Song When Opening Jukebox" },
             new BoolModSettingControl(() => HideLyrics, newValue => HideLyrics = newValue) { Label = "Hide Lyrics" },
             new BoolModSettingControl(() => RandomSelection, newValue => RandomSelection = newValue) { Label = "Random Selection" },
             new BoolModSettingControl(() => AutoContinue, newValue => AutoContinue = newValue) { Label = "Auto Continue" },
@@ -329,12 +334,42 @@ public class BetterJukeboxModSettings : IModSettings
             new BoolModSettingControl(() => AutoHideMenu, newValue => AutoHideMenu = newValue) { Label = "Auto Hide Menu" },
             new BoolModSettingControl(() => ShakeMouseToShowMenu, newValue => ShakeMouseToShowMenu = newValue) { Label = "Shake Mouse To Show Menu" },
             new BoolModSettingControl(() => HideMouseAfterTimeout, newValue => HideMouseAfterTimeout = newValue) { Label = "Hide Mouse After Timeout" },
-            new BoolModSettingControl(() => AutoStartOnGameStart, newValue => AutoStartOnGameStart = newValue) { Label = "Auto Start On Game Start" },
             new BoolModSettingControl(() => HideBuiltInPauseButton, newValue => HideBuiltInPauseButton = newValue) { Label = "Hide Built-In Pause Button" },
+            new BoolModSettingControl(() => DebugLogging, newValue => DebugLogging = newValue) { Label = "Debug Logging" },
             new IntModSettingControl(() => NowPlayingSeconds, newValue => NowPlayingSeconds = newValue) { Label = "Now Playing Seconds" },
             new IntModSettingControl(() => OverlayHideSeconds, newValue => OverlayHideSeconds = newValue) { Label = "Overlay Hide Seconds" },
             new IntModSettingControl(() => AnimationSpeed, newValue => AnimationSpeed = newValue) { Label = "Animation Speed (0 Slow, 1 Normal, 2 Fast)" },
             new IntModSettingControl(() => UiTheme, newValue => UiTheme = newValue) { Label = "UI Theme (0 DiscoGrey, 1 DiscoPurple, 2 DiscoGreen, 3 DiscoBlue, 4 DiscoRed, 5 DiscoGold)" },
         };
+    }
+}
+
+
+public static class BetterJukeboxLog
+{
+    public static bool Enabled = false;
+
+    public static void Info(string message)
+    {
+        if (Enabled)
+        {
+            Debug.Log(message);
+        }
+    }
+
+    public static void Warning(string message)
+    {
+        if (Enabled)
+        {
+            Debug.LogWarning(message);
+        }
+    }
+
+    public static void Exception(System.Exception exception)
+    {
+        if (Enabled && exception != null)
+        {
+            Debug.LogException(exception);
+        }
     }
 }
