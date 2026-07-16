@@ -1,7 +1,9 @@
 
 
-🎵 BetterJukebox
+
 <img width="650" height="650" alt="#BetterJukeboxmini" src="https://github.com/user-attachments/assets/9021e0bd-8f44-43ae-acbf-5dc54ceffbca" />
+
+🎵 BetterJukebox
 
 Transform Melody Mania into the ultimate karaoke jukebox experience.
 
