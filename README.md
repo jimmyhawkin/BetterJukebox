@@ -10,9 +10,15 @@ Transform Melody Mania into the ultimate karaoke jukebox experience.
 BetterJukebox extends Melody Mania while preserving its native look and feel. The goal has never been to replace Melody Mania - only to add the features that feel like they should have been there from the beginning.
 
 ✨ New in 2.0
+
+<img width="2288" height="1160" alt="JBMenu" src="https://github.com/user-attachments/assets/b27abf77-6420-40f6-a7ac-22ffa741b445" />
+
 • Added a dedicated Jukebox mode in the main menu
+
 • Jukebox and Sing are now completely separated
+
 • BetterJukebox is only active when entering through Jukebox
+
 • Native Melody Mania Sing mode remains untouched
 
 ✨ Features
