@@ -3,7 +3,7 @@ using UnityEngine;
 
 public class BetterJukeboxModSettings : IModSettings
 {
-    private const string PersistentSettingsVersion = "2.1.0.31";
+    private const string PersistentSettingsVersion = "2.1.0.38";
     private static bool isLoadingPersistentSettings;
 
     private bool enableBetterJukebox = true;

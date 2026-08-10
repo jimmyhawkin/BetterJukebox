@@ -139,7 +139,7 @@ public class BetterJukeboxSceneMod : ISceneMod
                         OnLobbyNextClicked,
                         OnLobbyReturnLiveClicked);
 
-                    BetterJukeboxLog.Info("BetterJukebox 2.1.0.31 - Native BetterJukebox menu added to Song Select");
+                    BetterJukeboxLog.Info("BetterJukebox 2.1.0.38 - Native BetterJukebox menu added to Song Select");
                     return;
                 }
             }
@@ -257,11 +257,11 @@ public class BetterJukeboxSceneMod : ISceneMod
                     jukeboxButton.clicked += OnJukeboxMainMenuButtonClicked;
                     buttonRow.Add(jukeboxButton);
 
-                    BetterJukeboxLog.Info("BetterJukebox 2.1.0.31 - Jukebox button added to native main menu row");
+                    BetterJukeboxLog.Info("BetterJukebox 2.1.0.38 - Jukebox button added to native main menu row");
                     return;
                 }
 
-                BetterJukeboxLog.Warning("BetterJukebox 2.1.0.31 - native main menu button row was not found");
+                BetterJukeboxLog.Warning("BetterJukebox 2.1.0.38 - native main menu button row was not found");
             }
             catch (Exception ex)
             {
@@ -274,17 +274,17 @@ public class BetterJukeboxSceneMod : ISceneMod
     {
         try
         {
-            BetterJukeboxLog.Info("BetterJukebox 2.1.0.31 - Jukebox button clicked");
+            BetterJukeboxLog.Info("BetterJukebox 2.1.0.38 - Jukebox button clicked");
             if (!BeginJukeboxEntry())
             {
-                BetterJukeboxLog.Info("BetterJukebox 2.1.0.31 - duplicate Jukebox entry request ignored");
+                BetterJukeboxLog.Info("BetterJukebox 2.1.0.38 - duplicate Jukebox entry request ignored");
                 return;
             }
 
             object mainSceneControl = FindControlByName("MainSceneControl");
             if (mainSceneControl == null)
             {
-                BetterJukeboxLog.Warning("BetterJukebox 2.1.0.31 - MainSceneControl was not found");
+                BetterJukeboxLog.Warning("BetterJukebox 2.1.0.38 - MainSceneControl was not found");
                 ResetJukeboxEntryRequest();
                 return;
             }
@@ -292,12 +292,12 @@ public class BetterJukeboxSceneMod : ISceneMod
             if (TryInvokeNoArg(mainSceneControl, "OpenSongSelectScene")
                 || TryInvokeNoArg(mainSceneControl, "GoToSongSelectScene"))
             {
-                BetterJukeboxLog.Info("BetterJukebox 2.1.0.31 - opened native Song Select from Jukebox button");
+                BetterJukeboxLog.Info("BetterJukebox 2.1.0.38 - opened native Song Select from Jukebox button");
                 AwaitableUtils.ExecuteAfterDelayInSecondsAsync(1.0f, StartSongSelectWaitOnce);
                 return;
             }
 
-            BetterJukeboxLog.Warning("BetterJukebox 2.1.0.31 - native Song Select method was not found on MainSceneControl");
+            BetterJukeboxLog.Warning("BetterJukebox 2.1.0.38 - native Song Select method was not found on MainSceneControl");
             LogNoArgMethods(mainSceneControl);
             ResetJukeboxEntryRequest();
         }
@@ -365,7 +365,7 @@ public class BetterJukeboxSceneMod : ISceneMod
         if (!jukeboxModeActive && ReadJukeboxModeMarker())
         {
             jukeboxModeActive = true;
-            BetterJukeboxLog.Info("BetterJukebox 2.1.0.31 - restored Jukebox mode marker");
+            BetterJukeboxLog.Info("BetterJukebox 2.1.0.38 - restored Jukebox mode marker");
         }
     }
 

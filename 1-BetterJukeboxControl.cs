@@ -115,6 +115,9 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
     private VisualElement nowPlayingQueuePreviewContainer;
     private SongMeta nowPlayingCurrentSongMeta;
     private string nowPlayingQueuePreviewSignature = "";
+    private float lastNowPlayingNextPreviewUpdateTimeInSeconds = -100f;
+    private float nowPlayingNextPreviewReadyAtTimeInSeconds = -1f;
+    private bool betterJukeboxSceneTransitionInProgress;
     private SongMeta reservedAutomaticNextSongMeta;
     private bool nowPlayingWasHidden;
     private VisualElement progressContainer;
@@ -520,19 +523,44 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
 
         nowPlayingCurrentSongMeta = currentSongMeta;
+        nowPlayingQueuePreviewSignature = "";
         nowPlayingQueuePreviewContainer = new VisualElement();
         nowPlayingQueuePreviewContainer.name = "betterJukeboxNowPlayingNextPreview";
         parent.Add(nowPlayingQueuePreviewContainer);
+
+        // Build NEXT UP once together with NOW PLAYING so the complete card is
+        // visible as one presentation. The expensive repeated Queue polling remains
+        // throttled in UpdateNowPlayingNextPreview(), and all BetterJukebox UI work
+        // is still locked during the outgoing song transition.
+        nowPlayingNextPreviewReadyAtTimeInSeconds = Time.unscaledTime;
+        lastNowPlayingNextPreviewUpdateTimeInSeconds = Time.unscaledTime;
         RebuildNowPlayingNextPreview(true);
     }
 
     private void UpdateNowPlayingNextPreview()
     {
-        if (nowPlayingCard == null || nowPlayingWasHidden || nowPlayingQueuePreviewContainer == null)
+        if (nowPlayingCard == null
+            || nowPlayingWasHidden
+            || nowPlayingQueuePreviewContainer == null
+            || isFinishing
+            || betterJukeboxSceneTransitionInProgress
+            || Time.unscaledTime < nowPlayingNextPreviewReadyAtTimeInSeconds)
         {
             return;
         }
 
+        // Next Up was originally polled every frame. Resolving native Queue DTOs
+        // and SongMeta every frame is unnecessary and can make UI/scene fades
+        // visibly stutter while Queue has entries. A short polling interval keeps
+        // Companion/PC Queue changes responsive without doing reflection-heavy
+        // Queue work on every rendered frame.
+        float now = Time.unscaledTime;
+        if (now - lastNowPlayingNextPreviewUpdateTimeInSeconds < 0.25f)
+        {
+            return;
+        }
+
+        lastNowPlayingNextPreviewUpdateTimeInSeconds = now;
         RebuildNowPlayingNextPreview(false);
     }
 
@@ -632,7 +660,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
                 if (modSettings.ShowNowPlayingQueuePlayerMics)
                 {
-                    VisualElement playerMicElement = CreateSongQueueEntryPlayerMicElement(queueEntry);
+                    VisualElement playerMicElement = CreateSongQueueEntryPlayerMicElement(queueEntry, true);
                     if (playerMicElement != null)
                     {
                         playerMicElement.style.marginTop = 2f;
@@ -1106,7 +1134,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         actionOverlay.Add(buttonRow);
 
         uiDocument.rootVisualElement.Add(actionOverlay);
-        BetterJukeboxLog.Info("BetterJukebox v2.1.0.31 loaded - Scene Transition Compile Fix");
+        BetterJukeboxLog.Info("BetterJukebox v2.1.0.38 loaded - Overlay Fade Stability Fix");
         LogNativeSongMetaSearchReadyOnce();
     }
 
@@ -2305,7 +2333,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         headerRow.Add(closeButton);
         settingsPanel.Add(headerRow);
 
-        Label version = CreatePanelLabel("Version 2.1.0.31 Scene Transition Compile Fix");
+        Label version = CreatePanelLabel("Version 2.1.0.38 Overlay Fade Stability Fix");
         version.style.color = new Color(1f, 1f, 1f, 0.65f);
         settingsPanel.Add(version);
 
@@ -2458,6 +2486,13 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
     private void PrepareBetterJukeboxUiForSceneTransition()
     {
+        // From this point until this control is destroyed, Melody Mania owns the
+        // transition. Stop all BetterJukebox per-frame UI work so Queue polling,
+        // badges, Companion refreshes, layout and fades cannot compete with the
+        // native scene/song transition.
+        betterJukeboxSceneTransitionInProgress = true;
+        nowPlayingNextPreviewReadyAtTimeInSeconds = float.MaxValue;
+
         // Scene changes must stay native. Cancel any in-progress BetterJukebox
         // overlay fade and hide the playback menu immediately before the scene
         // transition starts, so our UI animation cannot visually bleed into the
@@ -2630,7 +2665,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         AddSettingsCategory(diagnosticsSection);
 
         VisualElement aboutSection = CreateSettingsCategory("About", "Version and mod information.");
-        Label versionInfo = CreatePanelLabel("BetterJukebox 2.1.0.31 Scene Transition Compile Fix");
+        Label versionInfo = CreatePanelLabel("BetterJukebox 2.1.0.38 Overlay Fade Stability Fix");
         versionInfo.style.color = GetAccentHoverColor();
         aboutSection.Add(versionInfo);
         Label disableInfo = CreatePanelLabel("To fully disable BetterJukebox, open Melody Mania > Mods and disable the mod there. This avoids two different enable states.");
@@ -3308,6 +3343,15 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
             return;
         }
 
+        // Detect the automatic end-of-song transition before any expensive UI
+        // polling. PrepareBetterJukeboxUiForSceneTransition() sets the shared
+        // transition lock when the final second starts.
+        UpdateFinishingScene();
+        if (betterJukeboxSceneTransitionInProgress)
+        {
+            return;
+        }
+
         ProcessKeyboardShortcuts();
         ProcessMultiSelectLongPress();
         ProcessPlaylistDialogEscapeInput();
@@ -3330,7 +3374,6 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         UpdateSettingsCompanionStatus();
         UpdateProgressBar();
         UpdateUiElementsFadeOut();
-        UpdateFinishingScene();
     }
 
 
@@ -4126,6 +4169,8 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         actionOverlayIsVisible = true;
         UnityEngine.Cursor.visible = true;
         ShowBrandLogo();
+        // Clear any stale opacity from an older/in-flight overlay animation.
+        actionOverlay.style.opacity = 1f;
         actionOverlay.style.display = DisplayStyle.Flex;
         actionOverlay.BringToFront();
         if (brandLogo != null)
@@ -4175,22 +4220,12 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         SafeHideElement(historyPanel);
         SafeHideElement(settingsPanel);
 
-        GameObject ownerObject = GetSafeOwnerGameObject();
-        if (actionOverlay != null && modSettings != null && modSettings.FadeAnimations && ownerObject != null)
-        {
-            AnimationUtils.FadeOutVisualElement(ownerObject, actionOverlay, 0.75f);
-            AwaitableUtils.ExecuteAfterDelayInSecondsAsync(0.75f, () =>
-            {
-                if (actionOverlay != null && !actionOverlayIsVisible)
-                {
-                    actionOverlay.style.display = DisplayStyle.None;
-                }
-            });
-        }
-        else
-        {
-            SafeHideElement(actionOverlay);
-        }
+        // Keep the menu lifetime synchronized with NOW PLAYING, but do not run
+        // AnimationUtils on the complete action overlay. Starting a new overlay
+        // animation + delayed callback on every hide can overlap later scene/menu
+        // transitions. This behavior was introduced in 2.1.0.23 and did not exist
+        // in the previously smooth versions.
+        SafeHideElement(actionOverlay);
         HideBrandLogo();
     }
 
@@ -6537,21 +6572,28 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
                 VisualElement textColumn = new VisualElement();
                 textColumn.style.flexDirection = FlexDirection.Column;
                 textColumn.style.flexGrow = 1f;
+                textColumn.style.justifyContent = Justify.Center;
 
                 Label label = CreatePanelLabel((index + 1) + ". " + displayName);
-                label.style.flexGrow = 1f;
-                label.style.marginBottom = 2;
+                // Do not let the title consume all remaining row height. That was
+                // pushing the native player/mic row down against the bottom edge.
+                label.style.flexGrow = 0f;
+                label.style.marginBottom = 5f;
                 textColumn.Add(label);
 
                 VisualElement playerMicElement = CreateSongQueueEntryPlayerMicElement(entry);
                 if (playerMicElement != null)
                 {
+                    playerMicElement.style.marginTop = 0f;
+                    playerMicElement.style.marginBottom = 1f;
                     textColumn.Add(playerMicElement);
                 }
                 else if (!string.IsNullOrWhiteSpace(playerMicText))
                 {
                     Label playerMicLabel = CreatePanelLabel("🎤 " + playerMicText);
                     playerMicLabel.style.fontSize = 14;
+                    playerMicLabel.style.marginTop = 0f;
+                    playerMicLabel.style.marginBottom = 1f;
                     playerMicLabel.style.color = new Color(0.8f, 0.9f, 1f, 0.95f);
                     textColumn.Add(playerMicLabel);
                 }
@@ -7303,6 +7345,11 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
     private VisualElement CreateSongQueueEntryPlayerMicElement(object entry)
     {
+        return CreateSongQueueEntryPlayerMicElement(entry, false);
+    }
+
+    private VisualElement CreateSongQueueEntryPlayerMicElement(object entry, bool compact)
+    {
         List<QueuePlayerMicInfo> infos = GetSongQueueEntryPlayerMicInfos(entry);
         if (infos.Count == 0)
         {
@@ -7312,11 +7359,11 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         VisualElement container = new VisualElement();
         container.style.flexDirection = FlexDirection.Row;
         container.style.flexWrap = Wrap.Wrap;
-        container.style.marginTop = 2;
+        container.style.marginTop = compact ? 0f : 2f;
 
         foreach (QueuePlayerMicInfo info in infos.Take(4))
         {
-            VisualElement playerMicEntry = CreateNativePlayerMicEntry(info);
+            VisualElement playerMicEntry = CreateNativePlayerMicEntry(info, compact);
             if (playerMicEntry != null)
             {
                 container.Add(playerMicEntry);
@@ -7326,6 +7373,11 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
     }
 
     private VisualElement CreateNativePlayerMicEntry(QueuePlayerMicInfo info)
+    {
+        return CreateNativePlayerMicEntry(info, false);
+    }
+
+    private VisualElement CreateNativePlayerMicEntry(QueuePlayerMicInfo info, bool compact)
     {
         if (info == null || nextGameRoundInfoPlayerEntryUi == null)
         {
@@ -7340,10 +7392,17 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
                 return null;
             }
 
-            root.style.marginRight = 7f;
-            root.style.marginTop = 1f;
-            root.style.marginBottom = 1f;
+            // Keep the proven native proportions everywhere except the compact
+            // Next Up queue preview. Compact mode scales the complete native
+            // player+mic entry together so icon and text stay proportional.
+            root.style.marginRight = compact ? 3f : 12f;
+            root.style.marginTop = compact ? 0f : 2f;
+            root.style.marginBottom = compact ? 0f : 2f;
+            root.style.alignItems = Align.Center;
             root.pickingMode = PickingMode.Ignore;
+            root.transform.scale = compact
+                ? new Vector3(0.70f, 0.70f, 1f)
+                : Vector3.one;
 
             VisualElement micIcon = root.Q("nextGameRoundPlayerEntryMicImage");
             if (micIcon != null)
@@ -7356,9 +7415,17 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
                     micIcon.style.color = visualMicColor;
                     micIcon.style.unityBackgroundImageTintColor = visualMicColor;
                 }
-                micIcon.style.width = 12f;
-                micIcon.style.height = 12f;
-                micIcon.style.marginRight = 3f;
+                // Original native proportions. Compact mode is handled by
+                // scaling the entire entry above, not the mic independently.
+                micIcon.style.width = 16f;
+                micIcon.style.height = 16f;
+                micIcon.style.minWidth = 16f;
+                micIcon.style.maxWidth = 16f;
+                micIcon.style.minHeight = 16f;
+                micIcon.style.maxHeight = 16f;
+                micIcon.style.flexShrink = 0f;
+                micIcon.style.alignSelf = Align.Center;
+                micIcon.style.marginRight = 5f;
             }
 
             Label playerLabel = root.Q<Label>("nextGameRoundPlayerEntryLabel");
@@ -7367,7 +7434,10 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
                 playerLabel.text = info.PlayerName;
                 playerLabel.AddToClassList("tinyFont");
                 playerLabel.AddToClassList("textShadow");
-                playerLabel.style.fontSize = 10f;
+                // Original matching player text size. Compact mode scales this
+                // together with the microphone icon.
+                playerLabel.style.fontSize = 14f;
+                playerLabel.style.alignSelf = Align.Center;
                 playerLabel.style.color = new Color(0.8f, 0.9f, 1f, 0.95f);
             }
 

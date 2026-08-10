@@ -1,7 +1,7 @@
 name: Better Jukebox
-version: 2.1.0.31
+version: 2.1.0.38
 description : |
-  BetterJukebox v2.1.0.31 - Scene Transition Compile Fix
+  BetterJukebox v2.1.0.38 - Overlay Fade Stability Fix
 
   - Replaces the temporary Song Select lobby design
   - Uses BetterJukebox's existing overlay button builders and theme styling
