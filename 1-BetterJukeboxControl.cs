@@ -897,7 +897,18 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
         mouseClickBlocker.RegisterCallback<PointerDownEvent>(evt =>
         {
-            if (evt.button == 0 && !IsPointerInsideBetterJukeboxOverlay(evt.position))
+            if (evt.button != 0)
+            {
+                return;
+            }
+
+            if (TrySeekFromNativeProgressBarClick(evt.position))
+            {
+                evt.StopImmediatePropagation();
+                return;
+            }
+
+            if (!IsPointerInsideBetterJukeboxOverlay(evt.position))
             {
                 evt.StopImmediatePropagation();
             }
@@ -921,6 +932,216 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
         // Add before the BetterJukebox overlay. The overlay is added afterwards and stays clickable.
         uiDocument.rootVisualElement.Add(mouseClickBlocker);
+    }
+
+    private bool IsPointerInsideNativeVolumeRegion(Vector2 position)
+    {
+        try
+        {
+            if (uiDocument == null || uiDocument.rootVisualElement == null)
+            {
+                return false;
+            }
+
+            Rect bounds = uiDocument.rootVisualElement.worldBound;
+            if (bounds.width <= 0f || bounds.height <= 0f)
+            {
+                return false;
+            }
+
+            float normalizedX = (position.x - bounds.xMin) / bounds.width;
+            float normalizedY = (position.y - bounds.yMin) / bounds.height;
+
+            // Melody Mania's native volume slider is the small control at the
+            // lower-left, before the elapsed time and long song progress bar.
+            // Percent-based bounds keep the hit area resolution independent.
+            return normalizedX >= 0.025f
+                && normalizedX <= 0.115f
+                && normalizedY >= 0.952f
+                && normalizedY <= 0.992f;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private bool IsMouseInsideNativeVolumeRegion()
+    {
+        try
+        {
+            if (Mouse.current == null || Screen.width <= 0 || Screen.height <= 0)
+            {
+                return false;
+            }
+
+            Vector2 screenPosition = Mouse.current.position.ReadValue();
+
+            // Input System screen coordinates use bottom-left origin.
+            float normalizedX = screenPosition.x / Screen.width;
+            float normalizedYFromTop = 1f - (screenPosition.y / Screen.height);
+
+            return normalizedX >= 0.025f
+                && normalizedX <= 0.115f
+                && normalizedYFromTop >= 0.952f
+                && normalizedYFromTop <= 0.992f;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private void UpdateNativeVolumeMousePassThrough()
+    {
+        if (mouseClickBlocker == null)
+        {
+            return;
+        }
+
+        bool allowNativeVolume =
+            !betterJukeboxSceneTransitionInProgress
+            && !IsAnyBetterJukeboxPopupVisible()
+            && IsMouseInsideNativeVolumeRegion();
+
+        // Melody Mania already owns this native click/drag volume slider,
+        // including its active blue visual state. BetterJukebox must never block
+        // that native control in Jukebox. Everywhere else the input blocker stays
+        // active so clicking the video still cannot pause playback.
+        mouseClickBlocker.pickingMode =
+            allowNativeVolume ? PickingMode.Ignore : PickingMode.Position;
+    }
+
+    private bool IsPointerInsideNativeProgressSeekRegion(Vector2 position)
+    {
+        try
+        {
+            if (uiDocument == null || uiDocument.rootVisualElement == null)
+            {
+                return false;
+            }
+
+            Rect bounds = uiDocument.rootVisualElement.worldBound;
+            if (bounds.width <= 0f || bounds.height <= 0f)
+            {
+                return false;
+            }
+
+            float normalizedX = (position.x - bounds.xMin) / bounds.width;
+            float normalizedY = (position.y - bounds.yMin) / bounds.height;
+
+            // Melody Mania's native song progress track occupies the long bottom
+            // strip between the time/volume controls on the left and Settings on
+            // the right. Keep the hit area narrow so those native controls are not
+            // affected. Percent-based bounds scale with the current resolution.
+            return normalizedX >= 0.145f
+                && normalizedX <= 0.945f
+                && normalizedY >= 0.952f
+                && normalizedY <= 0.992f;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private bool TrySeekFromNativeProgressBarClick(Vector2 position)
+    {
+        try
+        {
+            if (modSettings == null
+                || !modSettings.SeekOnProgressBar
+                || songAudioPlayer == null
+                || betterJukeboxSceneTransitionInProgress
+                || !IsPointerInsideNativeProgressSeekRegion(position))
+            {
+                return false;
+            }
+
+            Rect bounds = uiDocument.rootVisualElement.worldBound;
+            float trackLeft = bounds.xMin + (bounds.width * 0.145f);
+            float trackRight = bounds.xMin + (bounds.width * 0.945f);
+            float trackWidth = trackRight - trackLeft;
+            if (trackWidth <= 1f)
+            {
+                return false;
+            }
+
+            double duration = songAudioPlayer.DurationInMillis;
+            if (duration <= 0d)
+            {
+                return false;
+            }
+
+            float normalized = Mathf.Clamp01((position.x - trackLeft) / trackWidth);
+            double targetPositionInMillis = Math.Max(0d, Math.Min(duration - 1d, duration * normalized));
+            if (!SetNativePlaybackPositionInMillis(targetPositionInMillis))
+            {
+                return false;
+            }
+
+            // The native Melody Mania progress UI reads PositionInMillis itself,
+            // so its marker/time display will follow the new native playback position.
+            lastOverlayActivityTimeInSeconds = Time.unscaledTime;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            BetterJukeboxLog.Exception(ex);
+            return false;
+        }
+    }
+
+    private bool SetNativePlaybackPositionInMillis(double targetPositionInMillis)
+    {
+        try
+        {
+            if (songAudioPlayer == null)
+            {
+                return false;
+            }
+
+            System.Reflection.MethodInfo methodInfo = songAudioPlayer.GetType().GetMethod("SetPositionInMillis");
+            if (methodInfo != null)
+            {
+                System.Reflection.ParameterInfo[] parameters = methodInfo.GetParameters();
+                if (parameters.Length == 1)
+                {
+                    object value = ConvertPlaybackPositionValue(targetPositionInMillis, parameters[0].ParameterType);
+                    if (value != null)
+                    {
+                        methodInfo.Invoke(songAudioPlayer, new object[] { value });
+                        return true;
+                    }
+                }
+            }
+
+            System.Reflection.PropertyInfo propertyInfo = songAudioPlayer.GetType().GetProperty("PositionInMillis");
+            if (propertyInfo != null && propertyInfo.CanWrite)
+            {
+                object value = ConvertPlaybackPositionValue(targetPositionInMillis, propertyInfo.PropertyType);
+                if (value != null)
+                {
+                    propertyInfo.SetValue(songAudioPlayer, value, null);
+                    return true;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            BetterJukeboxLog.Exception(ex);
+        }
+
+        return false;
+    }
+
+    private object ConvertPlaybackPositionValue(double targetPositionInMillis, Type targetType)
+    {
+        if (targetType == typeof(double)) return targetPositionInMillis;
+        if (targetType == typeof(float)) return (float)targetPositionInMillis;
+        if (targetType == typeof(long)) return (long)targetPositionInMillis;
+        if (targetType == typeof(int)) return (int)targetPositionInMillis;
+        return null;
     }
 
     private bool IsPointerInsideBetterJukeboxOverlay(Vector2 position)
@@ -1134,7 +1355,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         actionOverlay.Add(buttonRow);
 
         uiDocument.rootVisualElement.Add(actionOverlay);
-        BetterJukeboxLog.Info("BetterJukebox v2.1.0.38 loaded - Overlay Fade Stability Fix");
+        BetterJukeboxLog.Info("BetterJukebox v2.1.1.6 loaded - Progress Jump Default On");
         LogNativeSongMetaSearchReadyOnce();
     }
 
@@ -2333,7 +2554,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         headerRow.Add(closeButton);
         settingsPanel.Add(headerRow);
 
-        Label version = CreatePanelLabel("Version 2.1.0.38 Overlay Fade Stability Fix");
+        Label version = CreatePanelLabel("Version 2.1.1.6 Progress Jump Default On");
         version.style.color = new Color(1f, 1f, 1f, 0.65f);
         settingsPanel.Add(version);
 
@@ -2512,6 +2733,10 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         popupVolumeGuardActive = false;
         popupLockedVolumePercent = -1;
         popupVolumeGuardUntil = 0f;
+        if (mouseClickBlocker != null)
+        {
+            mouseClickBlocker.pickingMode = PickingMode.Position;
+        }
         HideNowPlayingCard(false);
     }
 
@@ -2561,6 +2786,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         playbackSection.Add(CreateSettingsToggle("Auto Play Random Song When Opening Jukebox", () => modSettings.AutoPlayRandomSong, value => modSettings.AutoPlayRandomSong = value));
         playbackSection.Add(CreateSettingsToggle("Shuffle", () => modSettings.RandomSelection, value => modSettings.RandomSelection = value));
         playbackSection.Add(CreateSettingsToggle("Auto Continue", () => modSettings.AutoContinue, value => modSettings.AutoContinue = value));
+        playbackSection.Add(CreateSettingsToggle("Click Progress Bar to Jump", () => modSettings.SeekOnProgressBar, value => modSettings.SeekOnProgressBar = value));
         AddSettingsCategory(playbackSection);
 
         VisualElement smartSection = CreateSettingsCategoryWithToggle(
@@ -2665,7 +2891,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         AddSettingsCategory(diagnosticsSection);
 
         VisualElement aboutSection = CreateSettingsCategory("About", "Version and mod information.");
-        Label versionInfo = CreatePanelLabel("BetterJukebox 2.1.0.38 Overlay Fade Stability Fix");
+        Label versionInfo = CreatePanelLabel("BetterJukebox 2.1.1.6 Progress Jump Default On");
         versionInfo.style.color = GetAccentHoverColor();
         aboutSection.Add(versionInfo);
         Label disableInfo = CreatePanelLabel("To fully disable BetterJukebox, open Melody Mania > Mods and disable the mod there. This avoids two different enable states.");
@@ -3364,6 +3590,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         ProcessPlaylistHoldMoveProgress();
         UpdateGoLiveHolds();
         UpdateSkipSong();
+        UpdateNativeVolumeMousePassThrough();
         SuppressBuiltInMousePause();
         HideBuiltInPauseButton();
         KeepSearchFieldFocused();

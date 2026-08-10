@@ -3,7 +3,7 @@ using UnityEngine;
 
 public class BetterJukeboxModSettings : IModSettings
 {
-    private const string PersistentSettingsVersion = "2.1.0.38";
+    private const string PersistentSettingsVersion = "2.1.1.6";
     private static bool isLoadingPersistentSettings;
 
     private bool enableBetterJukebox = true;
@@ -26,6 +26,7 @@ public class BetterJukeboxModSettings : IModSettings
     private bool showNowPlaying = true;
     private bool showMouseOverlay = true;
     private bool showProgressBar = false;
+    private bool seekOnProgressBar = true;
     private bool showAlbumArtInSearch = false;
     private bool showAlbumArtInQueue = true;
     private bool showAlbumArtInHistory = true;
@@ -65,6 +66,7 @@ public class BetterJukeboxModSettings : IModSettings
     public bool ShowNowPlaying { get { return showNowPlaying; } set { SetBool(ref showNowPlaying, value); } }
     public bool ShowMouseOverlay { get { return showMouseOverlay; } set { SetBool(ref showMouseOverlay, value); } }
     public bool ShowProgressBar { get { return showProgressBar; } set { SetBool(ref showProgressBar, value); } }
+    public bool SeekOnProgressBar { get { return seekOnProgressBar; } set { SetBool(ref seekOnProgressBar, value); } }
     public bool ShowAlbumArtInSearch { get { return showAlbumArtInSearch; } set { SetBool(ref showAlbumArtInSearch, value); } }
     public bool ShowAlbumArtInQueue { get { return showAlbumArtInQueue; } set { SetBool(ref showAlbumArtInQueue, value); } }
     public bool ShowAlbumArtInHistory { get { return showAlbumArtInHistory; } set { SetBool(ref showAlbumArtInHistory, value); } }
@@ -185,6 +187,7 @@ public class BetterJukeboxModSettings : IModSettings
                 showNowPlaying = ReadBool(json, "ShowNowPlaying", showNowPlaying);
                 showMouseOverlay = ReadBool(json, "ShowMouseOverlay", showMouseOverlay);
                 showProgressBar = ReadBool(json, "ShowProgressBar", showProgressBar);
+                seekOnProgressBar = ReadBool(json, "SeekOnProgressBar", seekOnProgressBar);
                 showAlbumArtInSearch = ReadBool(json, "ShowAlbumArtInSearch", showAlbumArtInSearch);
                 showAlbumArtInQueue = ReadBool(json, "ShowAlbumArtInQueue", showAlbumArtInQueue);
                 showAlbumArtInHistory = ReadBool(json, "ShowAlbumArtInHistory", showAlbumArtInHistory);
@@ -246,6 +249,7 @@ public class BetterJukeboxModSettings : IModSettings
             AppendBool(builder, "ShowNowPlaying", showNowPlaying, true);
             AppendBool(builder, "ShowMouseOverlay", showMouseOverlay, true);
             AppendBool(builder, "ShowProgressBar", showProgressBar, true);
+            AppendBool(builder, "SeekOnProgressBar", seekOnProgressBar, true);
             AppendBool(builder, "ShowAlbumArtInSearch", showAlbumArtInSearch, true);
             AppendBool(builder, "ShowAlbumArtInQueue", showAlbumArtInQueue, true);
             AppendBool(builder, "ShowAlbumArtInHistory", showAlbumArtInHistory, true);
