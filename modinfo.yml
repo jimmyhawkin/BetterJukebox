@@ -1,7 +1,7 @@
 name: Better Jukebox
-version: 2.0.0.24
+version: 2.1.0.31
 description : |
-  BetterJukebox v2.0.0.24 - History and Next Hold Threshold
+  BetterJukebox v2.1.0.31 - Scene Transition Compile Fix
 
   - Replaces the temporary Song Select lobby design
   - Uses BetterJukebox's existing overlay button builders and theme styling
@@ -18,6 +18,37 @@ description : |
   - Routine diagnostic logging is disabled by default
   - Debug Logging can be enabled from BetterJukebox Settings
   - History hold and History panel Go Live use one shared Queue-first / Random-fallback path
+  - Hides the native Song Select player icon list only in Jukebox mode
+  - Native Sing player selection remains unchanged
+  - Adds a dedicated Smart Jukebox settings section
+  - Enable Smart Song Selection is the master switch in the Smart Song Selection section header
+  - Smart selection only runs when the native Queue is empty
+  - Can avoid the same artist in a row
+  - Can avoid recently played songs with a configurable window
+  - Can prefer songs not yet played in the current session
+  - Can avoid the same exact genre in a row (default Off)
+  - Smart Song Selection sub-options are disabled visually when the master switch is Off
+  - New Playlist now offers Create Empty Playlist or Create From Genre
+  - Create From Genre supports selecting multiple genre values
+  - Playlist naming is shown after genre selection with the first selected genre as the editable suggestion
+  - Genre playlists are built from Melody Mania's loaded SongMeta and native Song IDs
+  - Native Queue order and contents are never modified
+  - New Playlist choices use spaced option cards with descriptions
+  - Escape closes New Playlist and navigates back one step in the genre playlist flow
+  - Genre selection keeps a clear visual gap above the fixed footer controls
+
+  - Adds Create Top Played Playlist using Melody Mania native StatisticsManager data
+  - Top Played size is user-selectable and ranked by TimesFinished, then TimesStarted
+  - Adds Create All-Time Favorites containing all songs with native play history
+  - Statistics playlist dialogs follow the same ESC back-stack as other playlist creation dialogs
+  - Stores BetterJukebox persistent data under ModsPersistentData/BetterJukebox
+  - Removes the Jukebox session marker from Unity PlayerPrefs and stores it with BetterJukebox data
+  - Migrates legacy BetterJukebox settings, favorites and playlists when needed
+  - Now Playing shows the actual next song
+  - Native Queue is previewed first and always remains authoritative
+  - When Queue is empty, Smart Song Selection reserves and previews the next automatic song
+  - If Smart Song Selection is disabled, the next normal random song is reserved and previewed
+  - A newly queued song immediately replaces and cancels any automatic reservation while Now Playing is visible
 
 authors:
   - Jimmy Berglund

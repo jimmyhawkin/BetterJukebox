@@ -3,7 +3,7 @@ using UnityEngine;
 
 public class BetterJukeboxModSettings : IModSettings
 {
-    private const string PersistentSettingsVersion = "2.0.0.24";
+    private const string PersistentSettingsVersion = "2.1.0.31";
     private static bool isLoadingPersistentSettings;
 
     private bool enableBetterJukebox = true;
@@ -17,6 +17,12 @@ public class BetterJukeboxModSettings : IModSettings
     private bool hideLyrics = false;
     private bool randomSelection = true;
     private bool autoContinue = true;
+    private bool enableSmartSongSelection = true;
+    private bool avoidSameArtistInARow = true;
+    private bool avoidRecentlyPlayedSongs = true;
+    private bool avoidSameGenreInARow = false;
+    private int recentSongWindow = 20;
+    private bool preferSongsNotPlayedThisSession = true;
     private bool showNowPlaying = true;
     private bool showMouseOverlay = true;
     private bool showProgressBar = false;
@@ -50,6 +56,12 @@ public class BetterJukeboxModSettings : IModSettings
     public bool HideLyrics { get { return hideLyrics; } set { SetBool(ref hideLyrics, value); } }
     public bool RandomSelection { get { return randomSelection; } set { SetBool(ref randomSelection, value); } }
     public bool AutoContinue { get { return autoContinue; } set { SetBool(ref autoContinue, value); } }
+    public bool EnableSmartSongSelection { get { return enableSmartSongSelection; } set { SetBool(ref enableSmartSongSelection, value); } }
+    public bool AvoidSameArtistInARow { get { return avoidSameArtistInARow; } set { SetBool(ref avoidSameArtistInARow, value); } }
+    public bool AvoidRecentlyPlayedSongs { get { return avoidRecentlyPlayedSongs; } set { SetBool(ref avoidRecentlyPlayedSongs, value); } }
+    public bool AvoidSameGenreInARow { get { return avoidSameGenreInARow; } set { SetBool(ref avoidSameGenreInARow, value); } }
+    public int RecentSongWindow { get { return recentSongWindow; } set { SetInt(ref recentSongWindow, Mathf.Clamp(value, 1, 100)); } }
+    public bool PreferSongsNotPlayedThisSession { get { return preferSongsNotPlayedThisSession; } set { SetBool(ref preferSongsNotPlayedThisSession, value); } }
     public bool ShowNowPlaying { get { return showNowPlaying; } set { SetBool(ref showNowPlaying, value); } }
     public bool ShowMouseOverlay { get { return showMouseOverlay; } set { SetBool(ref showMouseOverlay, value); } }
     public bool ShowProgressBar { get { return showProgressBar; } set { SetBool(ref showProgressBar, value); } }
@@ -98,12 +110,47 @@ public class BetterJukeboxModSettings : IModSettings
 
     private static string GetPersistentSettingsDirectory()
     {
-        return System.IO.Path.Combine(System.IO.Path.Combine(Application.persistentDataPath, "Mods"), "BetterJukebox");
+        return System.IO.Path.Combine(System.IO.Path.Combine(Application.persistentDataPath, "ModsPersistentData"), "BetterJukebox");
+    }
+
+    private static string GetLegacyPersistentSettingsPath()
+    {
+        return System.IO.Path.Combine(System.IO.Path.Combine(System.IO.Path.Combine(Application.persistentDataPath, "Mods"), "BetterJukebox"), "BetterJukeboxSettings.json");
     }
 
     private static string GetPersistentSettingsPath()
     {
         return System.IO.Path.Combine(GetPersistentSettingsDirectory(), "BetterJukeboxSettings.json");
+    }
+
+    private static void MigrateLegacyPersistentSettingsIfNeeded()
+    {
+        try
+        {
+            string newPath = GetPersistentSettingsPath();
+            if (System.IO.File.Exists(newPath))
+            {
+                return;
+            }
+
+            string oldPath = GetLegacyPersistentSettingsPath();
+            if (!System.IO.File.Exists(oldPath))
+            {
+                return;
+            }
+
+            string directory = GetPersistentSettingsDirectory();
+            if (!System.IO.Directory.Exists(directory))
+            {
+                System.IO.Directory.CreateDirectory(directory);
+            }
+
+            System.IO.File.Copy(oldPath, newPath, false);
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning("BetterJukebox could not migrate persistent settings: " + ex.Message);
+        }
     }
 
     public void LoadPersistentSettings()
@@ -112,6 +159,7 @@ public class BetterJukeboxModSettings : IModSettings
 
         try
         {
+            MigrateLegacyPersistentSettingsIfNeeded();
             string path = GetPersistentSettingsPath();
             if (System.IO.File.Exists(path))
             {
@@ -128,6 +176,12 @@ public class BetterJukeboxModSettings : IModSettings
                 hideLyrics = ReadBool(json, "HideLyrics", hideLyrics);
                 randomSelection = ReadBool(json, "RandomSelection", randomSelection);
                 autoContinue = ReadBool(json, "AutoContinue", autoContinue);
+                enableSmartSongSelection = ReadBool(json, "EnableSmartSongSelection", enableSmartSongSelection);
+                avoidSameArtistInARow = ReadBool(json, "AvoidSameArtistInARow", avoidSameArtistInARow);
+                avoidRecentlyPlayedSongs = ReadBool(json, "AvoidRecentlyPlayedSongs", avoidRecentlyPlayedSongs);
+                avoidSameGenreInARow = ReadBool(json, "AvoidSameGenreInARow", avoidSameGenreInARow);
+                recentSongWindow = Mathf.Clamp(ReadInt(json, "RecentSongWindow", recentSongWindow), 1, 100);
+                preferSongsNotPlayedThisSession = ReadBool(json, "PreferSongsNotPlayedThisSession", preferSongsNotPlayedThisSession);
                 showNowPlaying = ReadBool(json, "ShowNowPlaying", showNowPlaying);
                 showMouseOverlay = ReadBool(json, "ShowMouseOverlay", showMouseOverlay);
                 showProgressBar = ReadBool(json, "ShowProgressBar", showProgressBar);
@@ -183,6 +237,12 @@ public class BetterJukeboxModSettings : IModSettings
             AppendBool(builder, "HideLyrics", hideLyrics, true);
             AppendBool(builder, "RandomSelection", randomSelection, true);
             AppendBool(builder, "AutoContinue", autoContinue, true);
+            AppendBool(builder, "EnableSmartSongSelection", enableSmartSongSelection, true);
+            AppendBool(builder, "AvoidSameArtistInARow", avoidSameArtistInARow, true);
+            AppendBool(builder, "AvoidRecentlyPlayedSongs", avoidRecentlyPlayedSongs, true);
+            AppendBool(builder, "AvoidSameGenreInARow", avoidSameGenreInARow, true);
+            AppendInt(builder, "RecentSongWindow", recentSongWindow, true);
+            AppendBool(builder, "PreferSongsNotPlayedThisSession", preferSongsNotPlayedThisSession, true);
             AppendBool(builder, "ShowNowPlaying", showNowPlaying, true);
             AppendBool(builder, "ShowMouseOverlay", showMouseOverlay, true);
             AppendBool(builder, "ShowProgressBar", showProgressBar, true);
@@ -321,6 +381,12 @@ public class BetterJukeboxModSettings : IModSettings
             new BoolModSettingControl(() => HideLyrics, newValue => HideLyrics = newValue) { Label = "Hide Lyrics" },
             new BoolModSettingControl(() => RandomSelection, newValue => RandomSelection = newValue) { Label = "Random Selection" },
             new BoolModSettingControl(() => AutoContinue, newValue => AutoContinue = newValue) { Label = "Auto Continue" },
+            new BoolModSettingControl(() => EnableSmartSongSelection, newValue => EnableSmartSongSelection = newValue) { Label = "Enable Smart Song Selection" },
+            new BoolModSettingControl(() => AvoidSameArtistInARow, newValue => AvoidSameArtistInARow = newValue) { Label = "Avoid Same Artist in a Row" },
+            new BoolModSettingControl(() => AvoidRecentlyPlayedSongs, newValue => AvoidRecentlyPlayedSongs = newValue) { Label = "Avoid Recently Played Songs" },
+            new BoolModSettingControl(() => AvoidSameGenreInARow, newValue => AvoidSameGenreInARow = newValue) { Label = "Avoid Same Genre in a Row" },
+            new IntModSettingControl(() => RecentSongWindow, newValue => RecentSongWindow = newValue) { Label = "Recent Song Window" },
+            new BoolModSettingControl(() => PreferSongsNotPlayedThisSession, newValue => PreferSongsNotPlayedThisSession = newValue) { Label = "Prefer Songs Not Played This Session" },
             new BoolModSettingControl(() => ShowNowPlaying, newValue => ShowNowPlaying = newValue) { Label = "Show Now Playing" },
             new BoolModSettingControl(() => ShowNowPlayingQueuePlayerMics, newValue => ShowNowPlayingQueuePlayerMics = newValue) { Label = "Show Now Playing Queue Player/Mics" },
             new BoolModSettingControl(() => ShowFavoriteStars, newValue => ShowFavoriteStars = newValue) { Label = "Show Favorite Stars" },

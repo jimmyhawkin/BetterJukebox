@@ -112,6 +112,10 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
     private Label modInfoLabel;
     private Label nowPlayingLabel;
     private VisualElement nowPlayingCard;
+    private VisualElement nowPlayingQueuePreviewContainer;
+    private SongMeta nowPlayingCurrentSongMeta;
+    private string nowPlayingQueuePreviewSignature = "";
+    private SongMeta reservedAutomaticNextSongMeta;
     private bool nowPlayingWasHidden;
     private VisualElement progressContainer;
     private VisualElement progressFill;
@@ -153,8 +157,11 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
     private const int SearchRenderBatchSize = 50;
 
     private TextField playlistNameTextField;
+    private TextField topPlayedCountTextField;
     private int playlistNameCaretIndex;
     private Action<string> playlistNameDialogSubmitAction;
+    private Action playlistDialogEscapeAction;
+    private bool pendingPlaylistDialogEscape;
     private string selectedPlaylistName;
     private VisualElement favoriteRemoveConfirmPanel;
     private VisualElement playlistDeleteConfirmPanel;
@@ -461,23 +468,26 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         Label headerLabel = new Label("♪ NOW PLAYING");
         headerLabel.AddToClassList("tinyFont");
         headerLabel.AddToClassList("textShadow");
-        headerLabel.style.color = new Color(0.84f, 0.36f, 1f, 1f);
+        headerLabel.style.color = GetNowPlayingArtistAccentColor();
+        headerLabel.style.opacity = 1f;
         headerLabel.style.marginBottom = 8f;
         infoColumn.Add(headerLabel);
+
+        Label artistLabel = new Label(GetThemedArtistRichText(songMeta.Artist));
+        artistLabel.enableRichText = true;
+        artistLabel.AddToClassList("textShadow");
+        artistLabel.style.color = Color.white;
+        artistLabel.style.opacity = 1f;
+        artistLabel.style.fontSize = 26f;
+        artistLabel.style.marginBottom = 3f;
+        infoColumn.Add(artistLabel);
 
         Label titleLabel = new Label(!string.IsNullOrWhiteSpace(songMeta.Title) ? songMeta.Title : "Unknown title");
         titleLabel.AddToClassList("textShadow");
         titleLabel.style.color = Color.white;
         titleLabel.style.fontSize = 38f;
-        titleLabel.style.marginBottom = 4f;
+        titleLabel.style.marginBottom = 18f;
         infoColumn.Add(titleLabel);
-
-        Label artistLabel = new Label(!string.IsNullOrWhiteSpace(songMeta.Artist) ? songMeta.Artist : "Unknown artist");
-        artistLabel.AddToClassList("textShadow");
-        artistLabel.style.color = new Color(1f, 1f, 1f, 0.92f);
-        artistLabel.style.fontSize = 26f;
-        artistLabel.style.marginBottom = 18f;
-        infoColumn.Add(artistLabel);
 
         VisualElement playerMicElement = CreateSongQueueEntryPlayerMicElement(singSceneData);
         if (playerMicElement != null)
@@ -496,20 +506,72 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         separator.style.backgroundColor = new Color(1f, 1f, 1f, 0.10f);
         nowPlayingCard.Add(separator);
 
-        AddNowPlayingQueuePreview(nowPlayingCard);
+        AddNowPlayingQueuePreview(nowPlayingCard, songMeta);
 
         uiDocument.rootVisualElement.Add(nowPlayingCard);
         FadeOutNowPlayingCardAfterDelay();
     }
 
-    private void AddNowPlayingQueuePreview(VisualElement parent)
+    private void AddNowPlayingQueuePreview(VisualElement parent, SongMeta currentSongMeta)
     {
         if (parent == null)
         {
             return;
         }
 
+        nowPlayingCurrentSongMeta = currentSongMeta;
+        nowPlayingQueuePreviewContainer = new VisualElement();
+        nowPlayingQueuePreviewContainer.name = "betterJukeboxNowPlayingNextPreview";
+        parent.Add(nowPlayingQueuePreviewContainer);
+        RebuildNowPlayingNextPreview(true);
+    }
+
+    private void UpdateNowPlayingNextPreview()
+    {
+        if (nowPlayingCard == null || nowPlayingWasHidden || nowPlayingQueuePreviewContainer == null)
+        {
+            return;
+        }
+
+        RebuildNowPlayingNextPreview(false);
+    }
+
+    private void RebuildNowPlayingNextPreview(bool force)
+    {
+        if (nowPlayingQueuePreviewContainer == null)
+        {
+            return;
+        }
+
         List<object> queueEntries = GetRealSongQueueEntries();
+        SongMeta previewSongMeta = null;
+        bool fromQueue = queueEntries != null && queueEntries.Count > 0;
+
+        if (fromQueue)
+        {
+            // Explicit user intent always wins. Discard any automatic reservation.
+            reservedAutomaticNextSongMeta = null;
+            previewSongMeta = FindSongMetaForQueueEntry(queueEntries[0]);
+        }
+        else
+        {
+            previewSongMeta = GetOrCreateReservedAutomaticNextSongMeta(nowPlayingCurrentSongMeta);
+        }
+
+        string previewName = previewSongMeta != null
+            ? ((previewSongMeta.Artist ?? "") + " - " + (previewSongMeta.Title ?? "")).Trim(' ', '-')
+            : "";
+        string signature = (fromQueue ? "queue:" : "auto:")
+            + (queueEntries != null ? queueEntries.Count.ToString() : "0")
+            + ":" + previewName;
+
+        if (!force && signature == nowPlayingQueuePreviewSignature)
+        {
+            return;
+        }
+
+        nowPlayingQueuePreviewSignature = signature;
+        nowPlayingQueuePreviewContainer.Clear();
 
         VisualElement bottomRow = new VisualElement();
         bottomRow.style.flexDirection = FlexDirection.Row;
@@ -519,22 +581,15 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         listColumn.style.flexDirection = FlexDirection.Column;
         listColumn.style.flexGrow = 1f;
 
-        Label nextHeader = new Label("Next in Queue");
+        Label nextHeader = new Label("NEXT UP");
         nextHeader.AddToClassList("tinyFont");
         nextHeader.AddToClassList("textShadow");
-        nextHeader.style.color = new Color(0.84f, 0.36f, 1f, 1f);
-        nextHeader.style.marginBottom = 6f;
+        nextHeader.style.color = new Color(1f, 1f, 1f, 0.72f);
+        nextHeader.style.fontSize = 13f;
+        nextHeader.style.marginBottom = 5f;
         listColumn.Add(nextHeader);
 
-        if (queueEntries.Count == 0)
-        {
-            Label emptyLabel = new Label("Queue is empty");
-            emptyLabel.AddToClassList("tinyFont");
-            emptyLabel.AddToClassList("textShadow");
-            emptyLabel.style.color = new Color(1f, 1f, 1f, 0.70f);
-            listColumn.Add(emptyLabel);
-        }
-        else
+        if (fromQueue)
         {
             int limit = Math.Min(3, queueEntries.Count);
             for (int i = 0; i < limit; i++)
@@ -543,23 +598,45 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
                 VisualElement itemContainer = new VisualElement();
                 itemContainer.style.flexDirection = FlexDirection.Column;
-                itemContainer.style.marginTop = 2f;
-                itemContainer.style.marginBottom = 4f;
+                itemContainer.style.marginTop = 0f;
+                itemContainer.style.marginBottom = 5f;
 
-                Label itemLabel = new Label((i + 1) + ".  " + GetSongQueueEntryDisplayName(queueEntry));
-                itemLabel.AddToClassList("tinyFont");
-                itemLabel.AddToClassList("textShadow");
-                itemLabel.style.color = new Color(1f, 1f, 1f, 0.92f);
-                itemLabel.style.marginTop = 0f;
-                itemLabel.style.marginBottom = 0f;
-                itemContainer.Add(itemLabel);
+                SongMeta queuedSongMeta = FindSongMetaForQueueEntry(queueEntry);
+                if (queuedSongMeta != null)
+                {
+                    string queuedArtist = !string.IsNullOrWhiteSpace(queuedSongMeta.Artist) ? queuedSongMeta.Artist : "Unknown artist";
+                    string queuedTitle = !string.IsNullOrWhiteSpace(queuedSongMeta.Title) ? queuedSongMeta.Title : "Unknown title";
+                    string queuedLineText =
+                        GetThemedArtistRichText(queuedArtist)
+                        + "<color=#FFFFFF>  ·  "
+                        + queuedTitle.Replace("<", "‹").Replace(">", "›")
+                        + "</color>";
+
+                    Label queuedSongLineLabel = new Label(queuedLineText);
+                    queuedSongLineLabel.enableRichText = true;
+                    queuedSongLineLabel.AddToClassList("tinyFont");
+                    queuedSongLineLabel.AddToClassList("textShadow");
+                    queuedSongLineLabel.style.color = Color.white;
+                    queuedSongLineLabel.style.opacity = 1f;
+                    queuedSongLineLabel.style.fontSize = 14f;
+                    itemContainer.Add(queuedSongLineLabel);
+                }
+                else
+                {
+                    Label itemLabel = new Label(GetSongQueueEntryDisplayName(queueEntry));
+                    itemLabel.AddToClassList("tinyFont");
+                    itemLabel.AddToClassList("textShadow");
+                    itemLabel.style.color = new Color(1f, 1f, 1f, 0.92f);
+                    itemContainer.Add(itemLabel);
+                }
 
                 if (modSettings.ShowNowPlayingQueuePlayerMics)
                 {
                     VisualElement playerMicElement = CreateSongQueueEntryPlayerMicElement(queueEntry);
                     if (playerMicElement != null)
                     {
-                        playerMicElement.style.marginTop = 1f;
+                        playerMicElement.style.marginTop = 2f;
+                        playerMicElement.style.opacity = 0.9f;
                         itemContainer.Add(playerMicElement);
                     }
                 }
@@ -567,41 +644,145 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
                 listColumn.Add(itemContainer);
             }
         }
+        else if (previewSongMeta != null)
+        {
+            string previewArtist = !string.IsNullOrWhiteSpace(previewSongMeta.Artist) ? previewSongMeta.Artist : "Unknown artist";
+            string previewTitle = !string.IsNullOrWhiteSpace(previewSongMeta.Title) ? previewSongMeta.Title : "Unknown title";
+            string previewLineText =
+                GetThemedArtistRichText(previewArtist)
+                + "<color=#FFFFFF>  ·  "
+                + previewTitle.Replace("<", "‹").Replace(">", "›")
+                + "</color>";
+
+            Label previewSongLineLabel = new Label(previewLineText);
+            previewSongLineLabel.enableRichText = true;
+            previewSongLineLabel.AddToClassList("tinyFont");
+            previewSongLineLabel.AddToClassList("textShadow");
+            previewSongLineLabel.style.color = Color.white;
+            previewSongLineLabel.style.opacity = 1f;
+            previewSongLineLabel.style.fontSize = 16f;
+            listColumn.Add(previewSongLineLabel);
+        }
+        else
+        {
+            Label emptyLabel = new Label("No next song available");
+            emptyLabel.AddToClassList("tinyFont");
+            emptyLabel.AddToClassList("textShadow");
+            emptyLabel.style.color = new Color(1f, 1f, 1f, 0.70f);
+            listColumn.Add(emptyLabel);
+        }
 
         bottomRow.Add(listColumn);
 
-        VisualElement countBox = new VisualElement();
-        countBox.style.width = 110f;
-        countBox.style.height = 96f;
-        countBox.style.marginLeft = 18f;
-        countBox.style.alignItems = Align.Center;
-        countBox.style.justifyContent = Justify.Center;
-        countBox.style.backgroundColor = new Color(1f, 1f, 1f, 0f);
-        countBox.style.borderTopLeftRadius = 12f;
-        countBox.style.borderTopRightRadius = 12f;
-        countBox.style.borderBottomLeftRadius = 12f;
-        countBox.style.borderBottomRightRadius = 12f;
+        if (fromQueue)
+        {
+            VisualElement countBox = new VisualElement();
+            countBox.style.width = 96f;
+            countBox.style.height = 82f;
+            countBox.style.marginLeft = 14f;
+            countBox.style.alignItems = Align.Center;
+            countBox.style.justifyContent = Justify.Center;
 
-        Label countLabel = new Label(queueEntries.Count.ToString());
-        countLabel.AddToClassList("textShadow");
-        countLabel.style.color = new Color(0.84f, 0.36f, 1f, 1f);
-        countLabel.style.fontSize = 42f;
-        countBox.Add(countLabel);
+            Label countLabel = new Label(queueEntries.Count.ToString());
+            countLabel.AddToClassList("textShadow");
+            countLabel.style.color = new Color(0.84f, 0.36f, 1f, 1f);
+            countLabel.style.fontSize = 36f;
+            countBox.Add(countLabel);
 
-        Label songsLabel = new Label(queueEntries.Count == 1 ? "SONG" : "SONGS");
-        songsLabel.AddToClassList("tinyFont");
-        songsLabel.AddToClassList("textShadow");
-        songsLabel.style.color = new Color(1f, 1f, 1f, 0.78f);
-        countBox.Add(songsLabel);
+            Label songsLabel = new Label(queueEntries.Count == 1 ? "SONG" : "SONGS");
+            songsLabel.AddToClassList("tinyFont");
+            songsLabel.AddToClassList("textShadow");
+            songsLabel.style.color = new Color(1f, 1f, 1f, 0.78f);
+            countBox.Add(songsLabel);
 
-        Label nextLabel = new Label("NEXT");
-        nextLabel.AddToClassList("tinyFont");
-        nextLabel.AddToClassList("textShadow");
-        nextLabel.style.color = new Color(1f, 1f, 1f, 0.90f);
-        countBox.Add(nextLabel);
+            Label nextLabel = new Label("NEXT");
+            nextLabel.AddToClassList("tinyFont");
+            nextLabel.AddToClassList("textShadow");
+            nextLabel.style.color = new Color(1f, 1f, 1f, 0.90f);
+            countBox.Add(nextLabel);
+            bottomRow.Add(countBox);
+        }
 
-        bottomRow.Add(countBox);
-        parent.Add(bottomRow);
+        nowPlayingQueuePreviewContainer.Add(bottomRow);
+    }
+
+    private SongMeta GetOrCreateReservedAutomaticNextSongMeta(SongMeta currentSongMeta)
+    {
+        if (reservedAutomaticNextSongMeta != null)
+        {
+            return reservedAutomaticNextSongMeta;
+        }
+
+        List<SongMeta> allSelectableSongMetas = GetAllSelectableSongMetas();
+        if (allSelectableSongMetas == null || allSelectableSongMetas.Count == 0)
+        {
+            return null;
+        }
+
+        List<SongMeta> candidates = allSelectableSongMetas
+            .Where(songMeta => songMeta != null && !IsSameSmartSong(songMeta, currentSongMeta))
+            .ToList();
+        if (candidates.Count == 0)
+        {
+            candidates = allSelectableSongMetas.Where(songMeta => songMeta != null).ToList();
+        }
+
+        if (!modSettings.RandomSelection)
+        {
+            reservedAutomaticNextSongMeta = GetNextSequentialSongMeta(allSelectableSongMetas, currentSongMeta);
+            return reservedAutomaticNextSongMeta;
+        }
+
+        if (!modSettings.EnableSmartSongSelection)
+        {
+            reservedAutomaticNextSongMeta = GetNextRandomSongMeta(candidates);
+            return reservedAutomaticNextSongMeta;
+        }
+
+        // Apply the current song as the immediate artist/genre reference even though
+        // CreateNowPlayingCard runs just before the current song is inserted into History.
+        List<SongMeta> smartCandidates = candidates;
+        if (currentSongMeta != null && modSettings.AvoidSameArtistInARow)
+        {
+            string currentArtist = NormalizeSmartValue(currentSongMeta.Artist);
+            List<SongMeta> filtered = smartCandidates
+                .Where(songMeta => NormalizeSmartValue(songMeta.Artist) != currentArtist)
+                .ToList();
+            if (filtered.Count > 0)
+            {
+                smartCandidates = filtered;
+            }
+        }
+
+        if (currentSongMeta != null && modSettings.AvoidSameGenreInARow)
+        {
+            string currentGenre = GetSmartSongGenre(currentSongMeta);
+            if (!string.IsNullOrEmpty(currentGenre))
+            {
+                List<SongMeta> filtered = smartCandidates
+                    .Where(songMeta => GetSmartSongGenre(songMeta) != currentGenre)
+                    .ToList();
+                if (filtered.Count > 0)
+                {
+                    smartCandidates = filtered;
+                }
+            }
+        }
+
+        reservedAutomaticNextSongMeta = SelectSmartSongMeta(smartCandidates, modSettings)
+            ?? GetNextRandomSongMeta(smartCandidates);
+        return reservedAutomaticNextSongMeta;
+    }
+
+    private static bool IsSameSmartSong(SongMeta first, SongMeta second)
+    {
+        if (first == null || second == null)
+        {
+            return false;
+        }
+
+        return NormalizeSmartValue(first.Artist) == NormalizeSmartValue(second.Artist)
+            && NormalizeSmartValue(first.Title) == NormalizeSmartValue(second.Title);
     }
 
     private void CreateProgressBar()
@@ -775,7 +956,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         actionOverlay.style.position = Position.Absolute;
         actionOverlay.style.left = new StyleLength(new Length(0, LengthUnit.Pixel));
         actionOverlay.style.right = new StyleLength(new Length(0, LengthUnit.Pixel));
-        actionOverlay.style.bottom = new StyleLength(new Length(42, LengthUnit.Pixel));
+        ApplySharedJukeboxMenuPosition(actionOverlay);
         actionOverlay.style.flexDirection = FlexDirection.Column;
         actionOverlay.style.justifyContent = Justify.Center;
         actionOverlay.style.alignItems = Align.Center;
@@ -819,6 +1000,52 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         LogNativeSongMetaSearchReadyOnce();
     }
 
+    private void ApplySharedJukeboxMenuPosition(VisualElement overlay)
+    {
+        if (overlay == null)
+        {
+            return;
+        }
+
+        // Keep the Jukebox control row at the same relative screen height in
+        // Song Select and during playback. Percentage positioning scales with
+        // the current resolution while staying below Song Select album art and
+        // above Melody Mania lyrics/subtitle UI during playback.
+        overlay.style.bottom = new StyleLength(new Length(10.5f, LengthUnit.Percent));
+    }
+
+    private Color GetNowPlayingArtistAccentColor()
+    {
+        int theme = GetUiThemeIndex();
+
+        // Explicit artist colors for NOW PLAYING / NEXT UP so the text
+        // visibly follows the selected BetterJukebox theme.
+        if (theme == 0) return new Color(0.72f, 0.74f, 0.78f, 1f); // DiscoGrey
+        if (theme == 2) return new Color(0.24f, 0.94f, 0.46f, 1f); // DiscoGreen
+        if (theme == 3) return new Color(0.28f, 0.62f, 1f, 1f);    // DiscoBlue
+        if (theme == 4) return new Color(1f, 0.34f, 0.36f, 1f);    // DiscoRed
+        if (theme == 5) return new Color(1f, 0.76f, 0.24f, 1f);    // DiscoGold
+        return new Color(0.68f, 0.42f, 1f, 1f);                   // DiscoPurple
+    }
+
+    private string GetNowPlayingArtistThemeHex()
+    {
+        int theme = GetUiThemeIndex();
+        if (theme == 0) return "B8BDC7"; // DiscoGrey
+        if (theme == 2) return "3DF075"; // DiscoGreen
+        if (theme == 3) return "479EFF"; // DiscoBlue
+        if (theme == 4) return "FF575C"; // DiscoRed
+        if (theme == 5) return "FFC23D"; // DiscoGold
+        return "AD6BFF";                 // DiscoPurple
+    }
+
+    private string GetThemedArtistRichText(string artist)
+    {
+        string safeArtist = string.IsNullOrWhiteSpace(artist) ? "Unknown artist" : artist;
+        safeArtist = safeArtist.Replace("<", "‹").Replace(">", "›");
+        return "<color=#" + GetNowPlayingArtistThemeHex() + ">" + safeArtist + "</color>";
+    }
+
     private void CreateActionOverlay()
     {
         if (!modSettings.ShowMouseOverlay || uiDocument?.rootVisualElement == null)
@@ -831,7 +1058,8 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         actionOverlay.style.position = Position.Absolute;
         actionOverlay.style.left = new StyleLength(new Length(0, LengthUnit.Pixel));
         actionOverlay.style.right = new StyleLength(new Length(0, LengthUnit.Pixel));
-        actionOverlay.style.bottom = new StyleLength(new Length(42, LengthUnit.Pixel));
+        // Keep the playback controls above Melody Mania lyrics/subtitle UI without moving them to the top.
+        ApplySharedJukeboxMenuPosition(actionOverlay);
         actionOverlay.style.flexDirection = FlexDirection.Column;
         actionOverlay.style.justifyContent = Justify.Center;
         actionOverlay.style.alignItems = Align.Center;
@@ -878,7 +1106,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         actionOverlay.Add(buttonRow);
 
         uiDocument.rootVisualElement.Add(actionOverlay);
-        BetterJukeboxLog.Info("BetterJukebox v2.0.0.24 loaded - History and Next Hold Threshold");
+        BetterJukeboxLog.Info("BetterJukebox v2.1.0.31 loaded - Scene Transition Compile Fix");
         LogNativeSongMetaSearchReadyOnce();
     }
 
@@ -959,7 +1187,35 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
             {
                 try
                 {
+                    bool playlistDialogOpen = IsPlaylistDialogOpen();
                     bool playlistNameDialogOpen = IsPlaylistNameDialogOpen();
+
+                    if (playlistDialogOpen && !playlistNameDialogOpen && device is Keyboard)
+                    {
+                        foreach (InputControl control in eventPtr.EnumerateChangedControls(device))
+                        {
+                            KeyControl keyControl = control as KeyControl;
+                            if (keyControl == null)
+                            {
+                                continue;
+                            }
+                            float value = 0f;
+                            try
+                            {
+                                value = keyControl.ReadValueFromEvent(eventPtr);
+                            }
+                            catch
+                            {
+                                value = keyControl.ReadValue();
+                            }
+                            if (value >= 0.5f && keyControl.keyCode == Key.Escape)
+                            {
+                                pendingPlaylistDialogEscape = true;
+                                eventPtr.handled = true;
+                                return;
+                            }
+                        }
+                    }
 
                     if (playlistNameDialogOpen && device is Keyboard)
                     {
@@ -984,6 +1240,11 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
                             if (value < 0.5f)
                             {
                                 continue;
+                            }
+
+                            if (keyControl.keyCode == Key.Escape)
+                            {
+                                pendingPlaylistDialogEscape = true;
                             }
 
                             if (keyControl.keyCode == Key.Space
@@ -1076,7 +1337,8 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
                         bool shift = Keyboard.current != null
                                      && (Keyboard.current.leftShiftKey.isPressed || Keyboard.current.rightShiftKey.isPressed);
 
-                        if (keyControl.keyCode == Key.M
+                        if (keyControl.keyCode == Key.Space
+                            || keyControl.keyCode == Key.M
                             || keyControl.keyCode == Key.P
                             || keyControl.keyCode == Key.R)
                         {
@@ -1466,11 +1728,11 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         {
             searchInputHasFocus = false;
             ApplySearchInputTheme();
-            if (searchPanelIsVisible && !IsPlaylistNameDialogOpen())
+            if (searchPanelIsVisible && !IsPlaylistTextEntryDialogOpen())
             {
                 AwaitableUtils.ExecuteAfterDelayInFramesAsync(1, () =>
                 {
-                    if (searchPanelIsVisible && searchTextField != null && !IsPlaylistNameDialogOpen())
+                    if (searchPanelIsVisible && searchTextField != null && !IsPlaylistTextEntryDialogOpen())
                     {
                         searchTextField.Focus();
                     }
@@ -2043,7 +2305,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         headerRow.Add(closeButton);
         settingsPanel.Add(headerRow);
 
-        Label version = CreatePanelLabel("Version 2.0.0.24 History and Next Hold Threshold");
+        Label version = CreatePanelLabel("Version 2.1.0.31 Scene Transition Compile Fix");
         version.style.color = new Color(1f, 1f, 1f, 0.65f);
         settingsPanel.Add(version);
 
@@ -2196,6 +2458,19 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
     private void PrepareBetterJukeboxUiForSceneTransition()
     {
+        // Scene changes must stay native. Cancel any in-progress BetterJukebox
+        // overlay fade and hide the playback menu immediately before the scene
+        // transition starts, so our UI animation cannot visually bleed into the
+        // next Melody Mania screen.
+        if (actionOverlay != null)
+        {
+            actionOverlay.style.opacity = 1f;
+            actionOverlay.style.display = DisplayStyle.None;
+        }
+
+        actionOverlayIsVisible = false;
+        lastOverlayActivityTimeInSeconds = Time.unscaledTime;
+
         // Popups are bound to the current UI document. Close them before Melody Mania
         // starts loading the next SingScene so no popup keeps focus or stale elements.
         HideAllPopupPanels();
@@ -2252,6 +2527,24 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         playbackSection.Add(CreateSettingsToggle("Shuffle", () => modSettings.RandomSelection, value => modSettings.RandomSelection = value));
         playbackSection.Add(CreateSettingsToggle("Auto Continue", () => modSettings.AutoContinue, value => modSettings.AutoContinue = value));
         AddSettingsCategory(playbackSection);
+
+        VisualElement smartSection = CreateSettingsCategoryWithToggle(
+            "Smart Song Selection",
+            "Improve automatic song selection when the native Queue is empty.",
+            () => modSettings.EnableSmartSongSelection,
+            value => modSettings.EnableSmartSongSelection = value);
+
+        VisualElement smartOptions = new VisualElement();
+        smartOptions.name = "betterJukeboxSmartSongSelectionOptions";
+        smartOptions.style.flexDirection = FlexDirection.Column;
+        smartOptions.Add(CreateSettingsToggle("Avoid Same Artist in a Row", () => modSettings.AvoidSameArtistInARow, value => modSettings.AvoidSameArtistInARow = value));
+        smartOptions.Add(CreateSettingsToggle("Avoid Recently Played Songs", () => modSettings.AvoidRecentlyPlayedSongs, value => modSettings.AvoidRecentlyPlayedSongs = value));
+        smartOptions.Add(CreateSettingsCycleButton("Recent Song Window", modSettings.RecentSongWindow.ToString() + " songs", CycleRecentSongWindow));
+        smartOptions.Add(CreateSettingsToggle("Prefer Songs Not Played This Session", () => modSettings.PreferSongsNotPlayedThisSession, value => modSettings.PreferSongsNotPlayedThisSession = value));
+        smartOptions.Add(CreateSettingsToggle("Avoid Same Genre in a Row", () => modSettings.AvoidSameGenreInARow, value => modSettings.AvoidSameGenreInARow = value));
+        SetSettingsOptionsEnabled(smartOptions, modSettings.EnableSmartSongSelection);
+        smartSection.Add(smartOptions);
+        AddSettingsCategory(smartSection);
 
         VisualElement displaySection = CreateSettingsCategory("Display", "Choose what visual information BetterJukebox should show.");
         displaySection.Add(CreateSettingsToggle("Show Now Playing", () => modSettings.ShowNowPlaying, value => modSettings.ShowNowPlaying = value));
@@ -2337,7 +2630,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         AddSettingsCategory(diagnosticsSection);
 
         VisualElement aboutSection = CreateSettingsCategory("About", "Version and mod information.");
-        Label versionInfo = CreatePanelLabel("BetterJukebox 2.0.0.24 History and Next Hold Threshold");
+        Label versionInfo = CreatePanelLabel("BetterJukebox 2.1.0.31 Scene Transition Compile Fix");
         versionInfo.style.color = GetAccentHoverColor();
         aboutSection.Add(versionInfo);
         Label disableInfo = CreatePanelLabel("To fully disable BetterJukebox, open Melody Mania > Mods and disable the mod there. This avoids two different enable states.");
@@ -2390,6 +2683,60 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
             Label subtitle = CreatePanelLabel(subtitleText);
             subtitle.style.color = new Color(1f, 1f, 1f, 0.62f);
             subtitle.style.whiteSpace = WhiteSpace.Normal;
+            subtitle.style.marginBottom = 6;
+            category.Add(subtitle);
+        }
+
+        return category;
+    }
+
+    private VisualElement CreateSettingsCategoryWithToggle(string titleText, string subtitleText, Func<bool> getter, Action<bool> setter)
+    {
+        VisualElement category = new VisualElement();
+        category.style.flexDirection = FlexDirection.Column;
+        category.style.marginTop = 6;
+        category.style.marginBottom = 10;
+        category.style.paddingLeft = 10;
+        category.style.paddingRight = 10;
+        category.style.paddingTop = 10;
+        category.style.paddingBottom = 10;
+        category.style.backgroundColor = GetRowColor();
+        category.style.borderTopLeftRadius = 14;
+        category.style.borderTopRightRadius = 14;
+        category.style.borderBottomLeftRadius = 14;
+        category.style.borderBottomRightRadius = 14;
+        category.style.borderTopWidth = 1f;
+        category.style.borderBottomWidth = 1f;
+        category.style.borderLeftWidth = 1f;
+        category.style.borderRightWidth = 1f;
+        category.style.borderTopColor = GetPanelTopBorderColor();
+        category.style.borderBottomColor = GetPanelSideBorderColor();
+        category.style.borderLeftColor = GetPanelSideBorderColor();
+        category.style.borderRightColor = GetPanelSideBorderColor();
+
+        VisualElement headerRow = new VisualElement();
+        headerRow.style.flexDirection = FlexDirection.Row;
+        headerRow.style.alignItems = Align.Center;
+
+        Label title = CreatePanelLabel(titleText);
+        title.style.color = GetAccentHoverColor();
+        title.style.flexGrow = 1f;
+        headerRow.Add(title);
+
+        Button toggleButton = CreateSmallPanelButton(getter() ? "On" : "Off", () =>
+        {
+            setter(!getter());
+            UpdateSettingsPanel();
+        });
+        headerRow.Add(toggleButton);
+        category.Add(headerRow);
+
+        if (!string.IsNullOrEmpty(subtitleText))
+        {
+            Label subtitle = CreatePanelLabel(subtitleText);
+            subtitle.style.color = new Color(1f, 1f, 1f, 0.62f);
+            subtitle.style.whiteSpace = WhiteSpace.Normal;
+            subtitle.style.marginTop = 2;
             subtitle.style.marginBottom = 6;
             category.Add(subtitle);
         }
@@ -2468,6 +2815,16 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         return row;
     }
 
+    private void SetSettingsOptionsEnabled(VisualElement options, bool enabled)
+    {
+        if (options == null)
+        {
+            return;
+        }
+        options.SetEnabled(enabled);
+        options.style.opacity = enabled ? 1f : 0.42f;
+    }
+
     private VisualElement CreateSettingsCycleButton(string labelText, string valueText, Action clicked)
     {
         VisualElement row = CreatePanelRow();
@@ -2506,6 +2863,33 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         {
             modSettings.OverlayHideSeconds = 2;
         }
+    }
+
+    private void CycleRecentSongWindow()
+    {
+        int value = modSettings.RecentSongWindow;
+        if (value < 10)
+        {
+            value = 10;
+        }
+        else if (value < 20)
+        {
+            value = 20;
+        }
+        else if (value < 30)
+        {
+            value = 30;
+        }
+        else if (value < 50)
+        {
+            value = 50;
+        }
+        else
+        {
+            value = 5;
+        }
+        modSettings.RecentSongWindow = value;
+        UpdateSettingsPanel();
     }
 
     private string GetAnimationSpeedLabel()
@@ -2926,6 +3310,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
         ProcessKeyboardShortcuts();
         ProcessMultiSelectLongPress();
+        ProcessPlaylistDialogEscapeInput();
         ProcessPlaylistNameDialogKeyboardInput();
         ProcessPopupEscapeInput();
         UpdatePopupWheelVolumeGuard();
@@ -2940,6 +3325,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         KeepSearchFieldFocused();
         UpdateActionOverlay();
         UpdateQueueBadge(false);
+        UpdateNowPlayingNextPreview();
         UpdateCompanionHub(false);
         UpdateSettingsCompanionStatus();
         UpdateProgressBar();
@@ -3101,7 +3487,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
     private void ProcessKeyboardShortcuts()
     {
-        if (IsPlaylistNameDialogOpen())
+        if (IsPlaylistTextEntryDialogOpen())
         {
             return;
         }
@@ -3190,7 +3576,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
     private void ProcessPopupEscapeInput()
     {
-        if (IsPlaylistNameDialogOpen())
+        if (IsPlaylistDialogOpen())
         {
             return;
         }
@@ -3288,7 +3674,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
         if (kb.escapeKey.wasPressedThisFrame)
         {
-            ClosePlaylistDialog();
+            InvokePlaylistDialogEscape();
             return;
         }
 
@@ -3387,7 +3773,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
     private void ProcessSearchKeyboardInput()
     {
-        if (IsPlaylistNameDialogOpen())
+        if (IsPlaylistTextEntryDialogOpen())
         {
             return;
         }
@@ -3543,7 +3929,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
     private void KeepSearchFieldFocused()
     {
-        if (IsPlaylistNameDialogOpen())
+        if (IsPlaylistTextEntryDialogOpen())
         {
             return;
         }
@@ -3702,7 +4088,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
             return;
         }
 
-        int hideSeconds = Math.Max(1, modSettings.OverlayHideSeconds);
+        int hideSeconds = Math.Max(2, modSettings.NowPlayingSeconds);
         if (modSettings.HideMouseAfterTimeout && !actionOverlayIsVisible && Time.unscaledTime - lastOverlayActivityTimeInSeconds >= hideSeconds)
         {
             UnityEngine.Cursor.visible = false;
@@ -3788,7 +4174,23 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         SafeHideElement(companionPanel);
         SafeHideElement(historyPanel);
         SafeHideElement(settingsPanel);
-        SafeHideElement(actionOverlay);
+
+        GameObject ownerObject = GetSafeOwnerGameObject();
+        if (actionOverlay != null && modSettings != null && modSettings.FadeAnimations && ownerObject != null)
+        {
+            AnimationUtils.FadeOutVisualElement(ownerObject, actionOverlay, 0.75f);
+            AwaitableUtils.ExecuteAfterDelayInSecondsAsync(0.75f, () =>
+            {
+                if (actionOverlay != null && !actionOverlayIsVisible)
+                {
+                    actionOverlay.style.display = DisplayStyle.None;
+                }
+            });
+        }
+        else
+        {
+            SafeHideElement(actionOverlay);
+        }
         HideBrandLogo();
     }
 
@@ -6938,9 +7340,9 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
                 return null;
             }
 
-            root.style.marginRight = 12f;
-            root.style.marginTop = 2f;
-            root.style.marginBottom = 2f;
+            root.style.marginRight = 7f;
+            root.style.marginTop = 1f;
+            root.style.marginBottom = 1f;
             root.pickingMode = PickingMode.Ignore;
 
             VisualElement micIcon = root.Q("nextGameRoundPlayerEntryMicImage");
@@ -6954,9 +7356,9 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
                     micIcon.style.color = visualMicColor;
                     micIcon.style.unityBackgroundImageTintColor = visualMicColor;
                 }
-                micIcon.style.width = 16f;
-                micIcon.style.height = 16f;
-                micIcon.style.marginRight = 5f;
+                micIcon.style.width = 12f;
+                micIcon.style.height = 12f;
+                micIcon.style.marginRight = 3f;
             }
 
             Label playerLabel = root.Q<Label>("nextGameRoundPlayerEntryLabel");
@@ -6965,7 +7367,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
                 playerLabel.text = info.PlayerName;
                 playerLabel.AddToClassList("tinyFont");
                 playerLabel.AddToClassList("textShadow");
-                playerLabel.style.fontSize = 14f;
+                playerLabel.style.fontSize = 10f;
                 playerLabel.style.color = new Color(0.8f, 0.9f, 1f, 0.95f);
             }
 
@@ -7640,7 +8042,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         searchPlaylistsActionRow.style.display = DisplayStyle.Flex;
         if (string.IsNullOrWhiteSpace(selectedPlaylistName))
         {
-            searchPlaylistsActionRow.Add(CreateSmallPanelButton("New Playlist", () => ShowPlaylistNameDialog("New Playlist", "Create", null, name => CreatePlaylist(name))));
+            searchPlaylistsActionRow.Add(CreateSmallPanelButton("New Playlist", ShowNewPlaylistOptionsDialog));
         }
         else
         {
@@ -8049,6 +8451,856 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
             }
         }
         return result;
+    }
+
+    private void ShowNewPlaylistOptionsDialog()
+    {
+        if (uiDocument == null || uiDocument.rootVisualElement == null)
+        {
+            return;
+        }
+        ClosePlaylistDialog();
+        playlistDialogPanel = CreatePlaylistCreationDialogBase("New Playlist", "Choose how the playlist should be created.");
+        playlistDialogPanel.name = "betterJukeboxNewPlaylistOptionsDialog";
+        playlistDialogEscapeAction = ClosePlaylistDialog;
+
+        Button emptyPlaylistButton = CreatePlaylistOptionButton(
+            "Create Empty Playlist",
+            "Create a blank playlist and add songs later.",
+            () =>
+            {
+                ClosePlaylistDialog();
+                ShowPlaylistNameDialog("New Playlist", "Create", null, name => CreatePlaylist(name), ShowNewPlaylistOptionsDialog);
+            });
+        emptyPlaylistButton.style.marginTop = 8;
+        playlistDialogPanel.Add(emptyPlaylistButton);
+
+        Button genrePlaylistButton = CreatePlaylistOptionButton(
+            "Create From Genre",
+            "Build a playlist from one or more genres in the loaded songs.",
+            () => ShowGenrePlaylistDialog(null));
+        genrePlaylistButton.style.marginTop = 12;
+        playlistDialogPanel.Add(genrePlaylistButton);
+
+        Button topPlayedPlaylistButton = CreatePlaylistOptionButton(
+            "Create Top Played Playlist",
+            "Create a playlist from Melody Mania's most finished songs.",
+            ShowTopPlayedPlaylistCountDialog);
+        topPlayedPlaylistButton.style.marginTop = 12;
+        playlistDialogPanel.Add(topPlayedPlaylistButton);
+
+        Button allTimeFavoritesButton = CreatePlaylistOptionButton(
+            "Create All-Time Favorites",
+            "Create a playlist containing every song that has ever been played.",
+            ShowAllTimeFavoritesNameDialog);
+        allTimeFavoritesButton.style.marginTop = 12;
+        playlistDialogPanel.Add(allTimeFavoritesButton);
+
+        Button cancelButton = CreateSmallPanelButton("Cancel", ClosePlaylistDialog);
+        cancelButton.style.marginTop = 22;
+        cancelButton.style.marginLeft = new StyleLength(new Length(30f, LengthUnit.Percent));
+        cancelButton.style.marginRight = new StyleLength(new Length(30f, LengthUnit.Percent));
+        playlistDialogPanel.Add(cancelButton);
+
+        uiDocument.rootVisualElement.Add(playlistDialogPanel);
+        playlistDialogPanel.BringToFront();
+        playlistDialogPanel.Focus();
+        ApplyButtonTreeTheme(playlistDialogPanel);
+    }
+
+    private void ShowGenrePlaylistDialog()
+    {
+        ShowGenrePlaylistDialog(null);
+    }
+
+    private void ShowGenrePlaylistDialog(List<string> initialSelectedGenres)
+    {
+        if (uiDocument == null || uiDocument.rootVisualElement == null)
+        {
+            return;
+        }
+        ClosePlaylistDialog();
+        Dictionary<string, List<SongMeta>> genres = BuildGenreSongMap();
+        List<string> selectedGenres = initialSelectedGenres != null
+            ? new List<string>(initialSelectedGenres)
+            : new List<string>();
+        playlistDialogPanel = CreatePlaylistCreationDialogBase("Create From Genre", "Select one or more genre values found in Melody Mania's loaded songs.");
+        playlistDialogPanel.name = "betterJukeboxGenrePlaylistDialog";
+        playlistDialogEscapeAction = ShowNewPlaylistOptionsDialog;
+        playlistDialogPanel.style.top = new StyleLength(new Length(6, LengthUnit.Percent));
+        playlistDialogPanel.style.bottom = new StyleLength(new Length(6, LengthUnit.Percent));
+        playlistDialogPanel.style.overflow = Overflow.Hidden;
+
+        int initiallySelectedSongCount = CountUniqueSongsForGenres(selectedGenres, genres);
+        Label selectionInfo = CreatePanelLabel("Selected: " + selectedGenres.Count + " genres  •  " + initiallySelectedSongCount + " songs");
+        selectionInfo.style.marginTop = 4;
+        selectionInfo.style.marginBottom = 6;
+        playlistDialogPanel.Add(selectionInfo);
+
+        ScrollView genreList = new ScrollView(ScrollViewMode.Vertical);
+        genreList.style.flexGrow = 1f;
+        genreList.style.flexShrink = 1f;
+        genreList.style.minHeight = 120;
+        genreList.style.marginTop = 4;
+        genreList.style.marginBottom = 24;
+
+        Button continueButton = null;
+        if (genres.Count == 0)
+        {
+            genreList.Add(CreatePanelLabel("No genre metadata was found in the loaded songs."));
+        }
+        else
+        {
+            List<string> names = genres.Keys.OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToList();
+            for (int i = 0; i < names.Count; i++)
+            {
+                string genreName = names[i];
+                List<SongMeta> genreSongs = genres[genreName];
+                int songCount = genreSongs != null ? genreSongs.Count : 0;
+                Button choiceButton = CreateGenreSelectionButton(genreName, songCount, selectedGenres, () =>
+                {
+                    int uniqueSongCount = CountUniqueSongsForGenres(selectedGenres, genres);
+                    selectionInfo.text = "Selected: " + selectedGenres.Count + " genres  •  " + uniqueSongCount + " songs";
+                    if (continueButton != null)
+                    {
+                        continueButton.SetEnabled(selectedGenres.Count > 0);
+                        continueButton.style.opacity = selectedGenres.Count > 0 ? 1f : 0.42f;
+                    }
+                });
+                if (selectedGenres.Contains(genreName))
+                {
+                    UpdateGenreSelectionButton(choiceButton, true);
+                }
+                genreList.Add(choiceButton);
+            }
+        }
+        playlistDialogPanel.Add(genreList);
+
+        continueButton = CreateSmallPanelButton("Continue", () =>
+        {
+            if (selectedGenres.Count == 0)
+            {
+                return;
+            }
+            List<string> genresToCreate = new List<string>(selectedGenres);
+            string suggestedName = "All " + genresToCreate[0] + " Songs";
+            ClosePlaylistDialog();
+            ShowPlaylistNameDialog(
+                "Name Genre Playlist",
+                "Create",
+                suggestedName,
+                name => CreatePlaylistFromGenres(name, genresToCreate, genres),
+                () => ShowGenrePlaylistDialog(genresToCreate));
+        });
+        continueButton.SetEnabled(selectedGenres.Count > 0);
+        continueButton.style.opacity = selectedGenres.Count > 0 ? 1f : 0.42f;
+
+        VisualElement footerRow = new VisualElement();
+        footerRow.style.flexDirection = FlexDirection.Row;
+        footerRow.style.alignItems = Align.Center;
+        footerRow.style.marginTop = 8;
+
+        Button cancelButton = CreateSmallPanelButton("Cancel", ClosePlaylistDialog);
+        Button backButton = CreateSmallPanelButton("‹ Back", ShowNewPlaylistOptionsDialog);
+        cancelButton.style.flexGrow = 1f;
+        backButton.style.flexGrow = 1f;
+        continueButton.style.flexGrow = 1f;
+        cancelButton.style.width = new StyleLength(new Length(32f, LengthUnit.Percent));
+        backButton.style.width = new StyleLength(new Length(32f, LengthUnit.Percent));
+        continueButton.style.width = new StyleLength(new Length(32f, LengthUnit.Percent));
+
+        footerRow.Add(cancelButton);
+        footerRow.Add(backButton);
+        footerRow.Add(continueButton);
+        playlistDialogPanel.Add(footerRow);
+        uiDocument.rootVisualElement.Add(playlistDialogPanel);
+        playlistDialogPanel.BringToFront();
+        ApplyButtonTreeTheme(playlistDialogPanel);
+    }
+
+    private Button CreatePlaylistOptionButton(string titleText, string descriptionText, Action action)
+    {
+        Button button = new Button(action);
+        button.name = "betterJukeboxPlaylistCreationOptionButton";
+        button.text = "";
+        button.style.flexDirection = FlexDirection.Column;
+        button.style.alignItems = Align.FlexStart;
+        button.style.justifyContent = Justify.Center;
+        button.style.minHeight = 64;
+        button.style.paddingLeft = 18;
+        button.style.paddingRight = 18;
+        button.style.paddingTop = 11;
+        button.style.paddingBottom = 11;
+        button.style.borderTopLeftRadius = 12;
+        button.style.borderTopRightRadius = 12;
+        button.style.borderBottomLeftRadius = 12;
+        button.style.borderBottomRightRadius = 12;
+
+        Label title = new Label(titleText);
+        title.AddToClassList("tinyFont");
+        title.style.color = GetButtonTextColor();
+        title.pickingMode = PickingMode.Ignore;
+        button.Add(title);
+
+        Label description = new Label(descriptionText);
+        description.AddToClassList("tinyFont");
+        description.style.color = new Color(1f, 1f, 1f, 0.62f);
+        description.style.marginTop = 3;
+        description.style.whiteSpace = WhiteSpace.Normal;
+        description.pickingMode = PickingMode.Ignore;
+        button.Add(description);
+
+        button.RegisterCallback<MouseEnterEvent>(evt =>
+        {
+            button.style.backgroundColor = GetRowHoverColor();
+            button.style.borderTopColor = GetAccentHoverColor();
+            button.style.borderBottomColor = GetAccentHoverColor();
+            button.style.borderLeftColor = GetAccentHoverColor();
+            button.style.borderRightColor = GetAccentHoverColor();
+        });
+        button.RegisterCallback<MouseLeaveEvent>(evt =>
+        {
+            button.style.backgroundColor = GetRowColor();
+            button.style.borderTopColor = GetPanelSideBorderColor();
+            button.style.borderBottomColor = GetPanelSideBorderColor();
+            button.style.borderLeftColor = GetPanelSideBorderColor();
+            button.style.borderRightColor = GetPanelSideBorderColor();
+        });
+        return button;
+    }
+
+    private void ShowTopPlayedPlaylistCountDialog()
+    {
+        if (uiDocument == null || uiDocument.rootVisualElement == null)
+        {
+            return;
+        }
+
+        ClosePlaylistDialog();
+        playlistDialogPanel = CreatePlaylistCreationDialogBase(
+            "Create Top Played Playlist",
+            "Choose how many of the most finished songs should be included.");
+        playlistDialogPanel.name = "betterJukeboxTopPlayedCountDialog";
+        playlistDialogEscapeAction = ShowNewPlaylistOptionsDialog;
+
+        List<SongMeta> rankedSongs = GetSongsRankedByNativeStatistics();
+        int availableCount = rankedSongs != null ? rankedSongs.Count : 0;
+        Label availableLabel = CreatePanelLabel(availableCount > 0
+            ? availableCount + " played songs are available in Melody Mania statistics."
+            : "No played-song statistics were found yet.");
+        availableLabel.style.whiteSpace = WhiteSpace.Normal;
+        availableLabel.style.color = new Color(1f, 1f, 1f, 0.72f);
+        availableLabel.style.marginTop = 4f;
+        availableLabel.style.marginBottom = 10f;
+        playlistDialogPanel.Add(availableLabel);
+
+        TextField countField = new TextField();
+        topPlayedCountTextField = countField;
+        countField.name = "betterJukeboxTopPlayedCountField";
+        countField.value = availableCount > 0 ? Math.Min(50, availableCount).ToString() : "50";
+        countField.style.flexGrow = 1f;
+        countField.style.marginLeft = 0f;
+        countField.style.marginRight = 0f;
+        countField.style.marginTop = 0f;
+        countField.style.marginBottom = 0f;
+        countField.style.color = Color.white;
+        countField.style.backgroundColor = new Color(0f, 0f, 0f, 0f);
+
+        VisualElement countFrame = new VisualElement();
+        countFrame.style.flexDirection = FlexDirection.Row;
+        countFrame.style.alignItems = Align.Center;
+        countFrame.style.paddingLeft = 12f;
+        countFrame.style.paddingRight = 12f;
+        countFrame.style.paddingTop = 7f;
+        countFrame.style.paddingBottom = 7f;
+        countFrame.style.marginBottom = 12f;
+        countFrame.style.backgroundColor = GetSearchInputBackgroundColor();
+        countFrame.style.borderTopLeftRadius = 12f;
+        countFrame.style.borderTopRightRadius = 12f;
+        countFrame.style.borderBottomLeftRadius = 12f;
+        countFrame.style.borderBottomRightRadius = 12f;
+        countFrame.style.borderTopWidth = 1f;
+        countFrame.style.borderBottomWidth = 1f;
+        countFrame.style.borderLeftWidth = 1f;
+        countFrame.style.borderRightWidth = 1f;
+        countFrame.style.borderTopColor = GetPanelSideBorderColor();
+        countFrame.style.borderBottomColor = GetPanelSideBorderColor();
+        countFrame.style.borderLeftColor = GetPanelSideBorderColor();
+        countFrame.style.borderRightColor = GetPanelSideBorderColor();
+        countFrame.Add(countField);
+        playlistDialogPanel.Add(countFrame);
+        ApplyPlaylistNameFieldTheme(countField);
+
+        VisualElement footerRow = new VisualElement();
+        footerRow.style.flexDirection = FlexDirection.Row;
+        footerRow.style.alignItems = Align.Center;
+        footerRow.style.marginTop = 8f;
+
+        Button cancelButton = CreateSmallPanelButton("Cancel", ClosePlaylistDialog);
+        Button backButton = CreateSmallPanelButton("‹ Back", ShowNewPlaylistOptionsDialog);
+        Button continueButton = CreateSmallPanelButton("Continue", () =>
+        {
+            int wantedCount;
+            if (!int.TryParse(countField.value, out wantedCount))
+            {
+                wantedCount = 50;
+            }
+            if (wantedCount < 1)
+            {
+                wantedCount = 1;
+            }
+            if (availableCount > 0 && wantedCount > availableCount)
+            {
+                wantedCount = availableCount;
+            }
+
+            int countToCreate = wantedCount;
+            string suggestedName = "Top " + countToCreate + " Played";
+            ClosePlaylistDialog();
+            ShowPlaylistNameDialog(
+                "Name Top Played Playlist",
+                "Create",
+                suggestedName,
+                name => CreatePlaylistFromNativeStatistics(name, countToCreate, false),
+                ShowTopPlayedPlaylistCountDialog);
+        });
+
+        bool canContinue = availableCount > 0;
+        continueButton.SetEnabled(canContinue);
+        continueButton.style.opacity = canContinue ? 1f : 0.42f;
+
+        cancelButton.style.flexGrow = 1f;
+        backButton.style.flexGrow = 1f;
+        continueButton.style.flexGrow = 1f;
+        cancelButton.style.width = new StyleLength(new Length(32f, LengthUnit.Percent));
+        backButton.style.width = new StyleLength(new Length(32f, LengthUnit.Percent));
+        continueButton.style.width = new StyleLength(new Length(32f, LengthUnit.Percent));
+        footerRow.Add(cancelButton);
+        footerRow.Add(backButton);
+        footerRow.Add(continueButton);
+        playlistDialogPanel.Add(footerRow);
+
+        countField.RegisterCallback<KeyDownEvent>(evt =>
+        {
+            if (evt.keyCode == KeyCode.Escape)
+            {
+                InvokePlaylistDialogEscape();
+                evt.StopImmediatePropagation();
+                return;
+            }
+        }, TrickleDown.TrickleDown);
+
+        uiDocument.rootVisualElement.Add(playlistDialogPanel);
+        playlistDialogPanel.BringToFront();
+        countField.Focus();
+        AwaitableUtils.ExecuteAfterDelayInFramesAsync(1, () =>
+        {
+            if (topPlayedCountTextField != null && playlistDialogPanel != null && playlistDialogPanel.parent != null)
+            {
+                topPlayedCountTextField.Focus();
+            }
+        });
+        ApplyButtonTreeTheme(playlistDialogPanel);
+    }
+
+    private void ShowAllTimeFavoritesNameDialog()
+    {
+        List<SongMeta> rankedSongs = GetSongsRankedByNativeStatistics();
+        if (rankedSongs == null || rankedSongs.Count == 0)
+        {
+            ShowTopPlayedPlaylistCountDialog();
+            return;
+        }
+
+        ShowPlaylistNameDialog(
+            "Name All-Time Favorites Playlist",
+            "Create",
+            "All-Time Favorites",
+            name => CreatePlaylistFromNativeStatistics(name, 0, true),
+            ShowNewPlaylistOptionsDialog);
+    }
+
+    private List<SongMeta> GetSongsRankedByNativeStatistics()
+    {
+        List<SongMeta> allSongs = GetAllSelectableSongMetas();
+        List<SongMeta> result = new List<SongMeta>();
+        if (allSongs == null || allSongs.Count == 0)
+        {
+            return result;
+        }
+
+        // StatisticsManager and SongStatistics can be exposed more than once in Melody Mania's
+        // mod app domain. Referencing either type directly makes Mono report CS0433.
+        // Locate the native singleton by runtime type name and then read its native Statistics object.
+        object statisticsManager = FindNativeSingletonByTypeName("StatisticsManager");
+        if (statisticsManager == null)
+        {
+            return result;
+        }
+
+        object statistics = GetMemberValue(statisticsManager, "Statistics");
+        object localStatisticsObject = GetMemberValue(statistics, "LocalStatistics");
+        System.Collections.IDictionary localStatistics = localStatisticsObject as System.Collections.IDictionary;
+        if (localStatistics == null)
+        {
+            return result;
+        }
+
+        Dictionary<SongMeta, object> statisticsBySong = new Dictionary<SongMeta, object>();
+        foreach (object entryObject in localStatistics)
+        {
+            object songStatistics = GetMemberValue(entryObject, "Value");
+            if (songStatistics == null || GetStatisticsInt(songStatistics, "TimesStarted") <= 0)
+            {
+                continue;
+            }
+
+            SongMeta matchingSong = FindLoadedSongForStatistics(allSongs, songStatistics);
+            if (matchingSong == null)
+            {
+                continue;
+            }
+
+            object existing;
+            if (!statisticsBySong.TryGetValue(matchingSong, out existing)
+                || IsStatisticsEntryPreferred(songStatistics, existing))
+            {
+                statisticsBySong[matchingSong] = songStatistics;
+            }
+        }
+
+        result = statisticsBySong.Keys
+            .OrderByDescending(songMeta => GetStatisticsInt(statisticsBySong[songMeta], "TimesFinished"))
+            .ThenByDescending(songMeta => GetStatisticsInt(statisticsBySong[songMeta], "TimesStarted"))
+            .ThenByDescending(songMeta => GetStatisticsSortValue(statisticsBySong[songMeta], "LastPlayed"))
+            .ThenBy(songMeta => songMeta.Artist ?? "", StringComparer.OrdinalIgnoreCase)
+            .ThenBy(songMeta => songMeta.Title ?? "", StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return result;
+    }
+
+    private object FindNativeSingletonByTypeName(string typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return null;
+        }
+
+        try
+        {
+            // StatisticsManager derives from AbstractSingletonBehaviour and is therefore a
+            // MonoBehaviour. Find the already-created native singleton component by runtime
+            // type name instead of referencing StatisticsManager/AppDomain directly.
+            MonoBehaviour[] behaviours = GameObject.FindObjectsOfType<MonoBehaviour>();
+            if (behaviours == null)
+            {
+                return null;
+            }
+
+            for (int i = 0; i < behaviours.Length; i++)
+            {
+                MonoBehaviour behaviour = behaviours[i];
+                if (behaviour == null)
+                {
+                    continue;
+                }
+
+                Type runtimeType = behaviour.GetType();
+                if (runtimeType == null || runtimeType.Name != typeName)
+                {
+                    continue;
+                }
+
+                if (GetMemberValue(behaviour, "Statistics") != null)
+                {
+                    return behaviour;
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
+    private int GetStatisticsInt(object statisticsEntry, string memberName)
+    {
+        object value = GetMemberValue(statisticsEntry, memberName);
+        if (value == null)
+        {
+            return 0;
+        }
+        try
+        {
+            return Convert.ToInt32(value);
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private long GetStatisticsSortValue(object statisticsEntry, string memberName)
+    {
+        object value = GetMemberValue(statisticsEntry, memberName);
+        if (value == null)
+        {
+            return 0L;
+        }
+        if (value is DateTime)
+        {
+            return ((DateTime)value).Ticks;
+        }
+        try
+        {
+            return Convert.ToInt64(value);
+        }
+        catch
+        {
+            return 0L;
+        }
+    }
+
+    private bool IsStatisticsEntryPreferred(object candidate, object existing)
+    {
+        if (candidate == null)
+        {
+            return false;
+        }
+        if (existing == null)
+        {
+            return true;
+        }
+
+        int candidateFinished = GetStatisticsInt(candidate, "TimesFinished");
+        int existingFinished = GetStatisticsInt(existing, "TimesFinished");
+        if (candidateFinished != existingFinished)
+        {
+            return candidateFinished > existingFinished;
+        }
+
+        int candidateStarted = GetStatisticsInt(candidate, "TimesStarted");
+        int existingStarted = GetStatisticsInt(existing, "TimesStarted");
+        if (candidateStarted != existingStarted)
+        {
+            return candidateStarted > existingStarted;
+        }
+
+        return GetStatisticsSortValue(candidate, "LastPlayed") > GetStatisticsSortValue(existing, "LastPlayed");
+    }
+
+    private SongMeta FindLoadedSongForStatistics(List<SongMeta> allSongs, object songStatistics)
+    {
+        if (allSongs == null || songStatistics == null)
+        {
+            return null;
+        }
+
+        string statisticsArtist = NormalizeStatisticsSongText(GetMemberValue(songStatistics, "SongArtist") as string);
+        string statisticsTitle = NormalizeStatisticsSongText(GetMemberValue(songStatistics, "SongTitle") as string);
+        if (string.IsNullOrEmpty(statisticsArtist) && string.IsNullOrEmpty(statisticsTitle))
+        {
+            return null;
+        }
+
+        for (int i = 0; i < allSongs.Count; i++)
+        {
+            SongMeta songMeta = allSongs[i];
+            if (songMeta == null)
+            {
+                continue;
+            }
+            if (NormalizeStatisticsSongText(songMeta.Artist) == statisticsArtist
+                && NormalizeStatisticsSongText(songMeta.Title) == statisticsTitle)
+            {
+                return songMeta;
+            }
+        }
+        return null;
+    }
+
+    private string NormalizeStatisticsSongText(string value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "" : value.Trim().ToLowerInvariant();
+    }
+
+    private void CreatePlaylistFromNativeStatistics(string playlistName, int maximumSongCount, bool includeAllPlayedSongs)
+    {
+        List<SongMeta> rankedSongs = GetSongsRankedByNativeStatistics();
+        if (rankedSongs == null || rankedSongs.Count == 0)
+        {
+            return;
+        }
+
+        int songsToUse = includeAllPlayedSongs
+            ? rankedSongs.Count
+            : Math.Min(Math.Max(1, maximumSongCount), rankedSongs.Count);
+
+        LoadPlaylists();
+        BetterJukeboxPlaylist playlist = new BetterJukeboxPlaylist();
+        playlist.Name = MakeUniquePlaylistName(playlistName);
+        for (int i = 0; i < songsToUse; i++)
+        {
+            string nativeId = GetFavoriteSongMetaId(rankedSongs[i]);
+            if (!string.IsNullOrWhiteSpace(nativeId) && !playlist.SongIds.Contains(nativeId))
+            {
+                playlist.SongIds.Add(nativeId);
+                playlist.AddedSongIds.Add(nativeId);
+            }
+        }
+
+        betterJukeboxPlaylists.Add(playlist);
+        SavePlaylists();
+        selectedPlaylistName = playlist.Name;
+        ClosePlaylistDialog();
+        UpdatePlaylistFilterButtonText();
+        UpdatePlaylistActionRowVisibility();
+        UpdateMultiSelectActionRowVisibility();
+        UpdateSearchResults(searchTextField != null ? searchTextField.value : "");
+    }
+
+    private Button CreateGenreSelectionButton(string genreName, int songCount, List<string> selectedGenres, Action selectionChanged)
+    {
+        Button button = null;
+        button = new Button(() =>
+        {
+            if (selectedGenres.Contains(genreName))
+            {
+                selectedGenres.Remove(genreName);
+            }
+            else
+            {
+                selectedGenres.Add(genreName);
+            }
+            UpdateGenreSelectionButton(button, selectedGenres.Contains(genreName));
+            if (selectionChanged != null)
+            {
+                selectionChanged();
+            }
+        });
+        button.name = "betterJukeboxGenreSelectionButton";
+        button.AddToClassList("tinyFont");
+        button.text = "";
+        button.style.flexDirection = FlexDirection.Row;
+        button.style.alignItems = Align.Center;
+        button.style.justifyContent = Justify.FlexStart;
+        button.style.minHeight = 42;
+        button.style.marginLeft = 4;
+        button.style.marginRight = 4;
+        button.style.marginTop = 3;
+        button.style.marginBottom = 3;
+        button.style.paddingLeft = 14;
+        button.style.paddingRight = 14;
+        button.style.paddingTop = 7;
+        button.style.paddingBottom = 7;
+        button.style.borderTopWidth = 1f;
+        button.style.borderBottomWidth = 1f;
+        button.style.borderLeftWidth = 1f;
+        button.style.borderRightWidth = 1f;
+        button.style.borderTopLeftRadius = 10;
+        button.style.borderTopRightRadius = 10;
+        button.style.borderBottomLeftRadius = 10;
+        button.style.borderBottomRightRadius = 10;
+
+        Label checkLabel = new Label("☐");
+        checkLabel.name = "betterJukeboxGenreCheckLabel";
+        checkLabel.AddToClassList("tinyFont");
+        checkLabel.style.width = 24;
+        checkLabel.style.marginRight = 8;
+        checkLabel.pickingMode = PickingMode.Ignore;
+        button.Add(checkLabel);
+
+        Label nameLabel = new Label(genreName ?? "Unknown");
+        nameLabel.name = "betterJukeboxGenreNameLabel";
+        nameLabel.AddToClassList("tinyFont");
+        nameLabel.style.flexGrow = 1f;
+        nameLabel.pickingMode = PickingMode.Ignore;
+        button.Add(nameLabel);
+
+        Label countLabel = new Label(songCount + (songCount == 1 ? " song" : " songs"));
+        countLabel.name = "betterJukeboxGenreCountLabel";
+        countLabel.AddToClassList("tinyFont");
+        countLabel.style.opacity = 0.72f;
+        countLabel.style.marginLeft = 12;
+        countLabel.pickingMode = PickingMode.Ignore;
+        button.Add(countLabel);
+
+        UpdateGenreSelectionButton(button, false);
+        button.RegisterCallback<MouseEnterEvent>(evt =>
+        {
+            button.style.backgroundColor = GetRowHoverColor();
+            button.style.borderTopColor = GetAccentHoverColor();
+            button.style.borderBottomColor = GetAccentHoverColor();
+            button.style.borderLeftColor = GetAccentHoverColor();
+            button.style.borderRightColor = GetAccentHoverColor();
+        });
+        button.RegisterCallback<MouseLeaveEvent>(evt =>
+        {
+            UpdateGenreSelectionButton(button, selectedGenres.Contains(genreName));
+        });
+        return button;
+    }
+
+    private void UpdateGenreSelectionButton(Button button, bool isSelected)
+    {
+        if (button == null)
+        {
+            return;
+        }
+        Label checkLabel = button.Q<Label>("betterJukeboxGenreCheckLabel");
+        Label nameLabel = button.Q<Label>("betterJukeboxGenreNameLabel");
+        Label countLabel = button.Q<Label>("betterJukeboxGenreCountLabel");
+        Color textColor = isSelected ? Color.white : GetButtonTextColor();
+        Color borderColor = isSelected ? GetAccentColor() : GetPanelSideBorderColor();
+        button.style.backgroundColor = isSelected ? new Color(GetAccentColor().r, GetAccentColor().g, GetAccentColor().b, 0.18f) : GetRowColor();
+        button.style.borderTopColor = borderColor;
+        button.style.borderBottomColor = borderColor;
+        button.style.borderLeftColor = borderColor;
+        button.style.borderRightColor = borderColor;
+        if (checkLabel != null)
+        {
+            checkLabel.text = isSelected ? "☑" : "☐";
+            checkLabel.style.color = isSelected ? GetAccentColor() : textColor;
+        }
+        if (nameLabel != null)
+        {
+            nameLabel.style.color = textColor;
+        }
+        if (countLabel != null)
+        {
+            countLabel.style.color = textColor;
+            countLabel.style.opacity = isSelected ? 0.9f : 0.72f;
+        }
+    }
+
+    private int CountUniqueSongsForGenres(List<string> selectedGenres, Dictionary<string, List<SongMeta>> genres)
+    {
+        List<SongMeta> uniqueSongs = new List<SongMeta>();
+        if (selectedGenres == null || genres == null)
+        {
+            return 0;
+        }
+        for (int i = 0; i < selectedGenres.Count; i++)
+        {
+            List<SongMeta> songs;
+            if (!genres.TryGetValue(selectedGenres[i], out songs) || songs == null)
+            {
+                continue;
+            }
+            for (int songIndex = 0; songIndex < songs.Count; songIndex++)
+            {
+                SongMeta songMeta = songs[songIndex];
+                if (songMeta != null && !uniqueSongs.Contains(songMeta))
+                {
+                    uniqueSongs.Add(songMeta);
+                }
+            }
+        }
+        return uniqueSongs.Count;
+    }
+
+    private VisualElement CreatePlaylistCreationDialogBase(string titleText, string subtitleText)
+    {
+        VisualElement dialog = new VisualElement();
+        dialog.style.position = Position.Absolute;
+        dialog.style.left = new StyleLength(new Length(24, LengthUnit.Percent));
+        dialog.style.right = new StyleLength(new Length(24, LengthUnit.Percent));
+        dialog.style.top = new StyleLength(new Length(16, LengthUnit.Percent));
+        dialog.style.flexDirection = FlexDirection.Column;
+        dialog.style.paddingLeft = 18;
+        dialog.style.paddingRight = 18;
+        dialog.style.paddingTop = 16;
+        dialog.style.paddingBottom = 16;
+        dialog.style.backgroundColor = new Color(0f, 0f, 0f, 0.96f);
+        dialog.style.borderTopLeftRadius = 16;
+        dialog.style.borderTopRightRadius = 16;
+        dialog.style.borderBottomLeftRadius = 16;
+        dialog.style.borderBottomRightRadius = 16;
+        dialog.style.borderTopWidth = 1;
+        dialog.style.borderBottomWidth = 1;
+        dialog.style.borderLeftWidth = 1;
+        dialog.style.borderRightWidth = 1;
+        ApplyThemedBorder(dialog);
+        Label title = CreatePanelLabel(titleText);
+        title.style.fontSize = 22;
+        title.style.marginBottom = 4;
+        dialog.Add(title);
+        Label subtitle = CreatePanelLabel(subtitleText);
+        subtitle.style.whiteSpace = WhiteSpace.Normal;
+        subtitle.style.color = new Color(1f, 1f, 1f, 0.68f);
+        subtitle.style.marginBottom = 10;
+        dialog.Add(subtitle);
+        return dialog;
+    }
+
+    private Dictionary<string, List<SongMeta>> BuildGenreSongMap()
+    {
+        Dictionary<string, List<SongMeta>> result = new Dictionary<string, List<SongMeta>>(StringComparer.OrdinalIgnoreCase);
+        List<SongMeta> songs = GetAllSelectableSongMetas();
+        for (int i = 0; i < songs.Count; i++)
+        {
+            SongMeta songMeta = songs[i];
+            string rawGenre = GetSongMetaSmartValue(songMeta, new string[] { "Genre", "Genres" });
+            if (string.IsNullOrWhiteSpace(rawGenre)) { continue; }
+            string[] parts = rawGenre.Split(new char[] { ';', ',', '/', '|' }, StringSplitOptions.RemoveEmptyEntries);
+            for (int p = 0; p < parts.Length; p++)
+            {
+                string genreName = NormalizeGenreDisplayName(parts[p]);
+                if (string.IsNullOrWhiteSpace(genreName)) { continue; }
+                List<SongMeta> genreSongs;
+                if (!result.TryGetValue(genreName, out genreSongs))
+                {
+                    genreSongs = new List<SongMeta>();
+                    result[genreName] = genreSongs;
+                }
+                if (!genreSongs.Contains(songMeta)) { genreSongs.Add(songMeta); }
+            }
+        }
+        return result;
+    }
+
+    private string NormalizeGenreDisplayName(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) { return ""; }
+        string trimmed = value.Trim();
+        if (trimmed.Length == 1) { return trimmed.ToUpperInvariant(); }
+        return char.ToUpperInvariant(trimmed[0]) + trimmed.Substring(1).ToLowerInvariant();
+    }
+
+    private void CreatePlaylistFromGenres(string playlistName, List<string> selectedGenres, Dictionary<string, List<SongMeta>> genres)
+    {
+        LoadPlaylists();
+        BetterJukeboxPlaylist playlist = new BetterJukeboxPlaylist();
+        playlist.Name = MakeUniquePlaylistName(playlistName);
+        if (selectedGenres != null && genres != null)
+        {
+            for (int genreIndex = 0; genreIndex < selectedGenres.Count; genreIndex++)
+            {
+                List<SongMeta> songs;
+                if (!genres.TryGetValue(selectedGenres[genreIndex], out songs) || songs == null)
+                {
+                    continue;
+                }
+                for (int songIndex = 0; songIndex < songs.Count; songIndex++)
+                {
+                    string nativeId = GetFavoriteSongMetaId(songs[songIndex]);
+                    if (!string.IsNullOrWhiteSpace(nativeId) && !playlist.SongIds.Contains(nativeId))
+                    {
+                        playlist.SongIds.Add(nativeId);
+                        playlist.AddedSongIds.Add(nativeId);
+                    }
+                }
+            }
+        }
+        betterJukeboxPlaylists.Add(playlist);
+        SavePlaylists();
+        selectedPlaylistName = playlist.Name;
+        ClosePlaylistDialog();
+        UpdatePlaylistFilterButtonText();
+        UpdatePlaylistActionRowVisibility();
+        UpdateMultiSelectActionRowVisibility();
+        UpdateSearchResults(searchTextField != null ? searchTextField.value : "");
     }
 
     private void CreatePlaylist(string name)
@@ -8726,13 +9978,64 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
     private void ClosePlaylistDialog()
     {
+        pendingPlaylistDialogEscape = false;
         playlistNameTextField = null;
+        topPlayedCountTextField = null;
         playlistNameDialogSubmitAction = null;
         if (playlistDialogPanel != null)
         {
             playlistDialogPanel.RemoveFromHierarchy();
             playlistDialogPanel = null;
         }
+    }
+
+    private bool IsPlaylistDialogOpen()
+    {
+        return playlistDialogPanel != null && playlistDialogPanel.parent != null;
+    }
+
+    private void InvokePlaylistDialogEscape()
+    {
+        Action escapeAction = playlistDialogEscapeAction;
+        if (escapeAction != null)
+        {
+            escapeAction();
+        }
+        else
+        {
+            ClosePlaylistDialog();
+        }
+    }
+
+    private void ProcessPlaylistDialogEscapeInput()
+    {
+        if (!IsPlaylistDialogOpen())
+        {
+            pendingPlaylistDialogEscape = false;
+            return;
+        }
+        try
+        {
+            bool escapePressed = pendingPlaylistDialogEscape;
+            Keyboard kb = Keyboard.current;
+            escapePressed = escapePressed || (kb != null && kb.escapeKey.wasPressedThisFrame);
+            if (escapePressed)
+            {
+                pendingPlaylistDialogEscape = false;
+                InvokePlaylistDialogEscape();
+            }
+        }
+        catch
+        {
+            pendingPlaylistDialogEscape = false;
+        }
+    }
+
+    private bool IsPlaylistTextEntryDialogOpen()
+    {
+        return playlistDialogPanel != null
+            && playlistDialogPanel.parent != null
+            && (playlistNameTextField != null || topPlayedCountTextField != null);
     }
 
     private bool IsPlaylistNameDialogOpen()
@@ -8756,9 +10059,15 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
     private void ShowPlaylistNameDialog(string title, string actionText, string initialName, Action<string> done)
     {
+        ShowPlaylistNameDialog(title, actionText, initialName, done, null);
+    }
+
+    private void ShowPlaylistNameDialog(string title, string actionText, string initialName, Action<string> done, Action escapeAction)
+    {
         ClosePlaylistDialog();
         if (uiDocument == null || uiDocument.rootVisualElement == null) { return; }
         playlistNameDialogSubmitAction = done;
+        playlistDialogEscapeAction = escapeAction != null ? escapeAction : (Action)ClosePlaylistDialog;
         playlistDialogPanel = new VisualElement();
         playlistDialogPanel.name = "betterJukeboxPlaylistNameDialog";
         playlistDialogPanel.focusable = true;
@@ -8804,7 +10113,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
             }
             if (evt.keyCode == KeyCode.Escape)
             {
-                ClosePlaylistDialog();
+                InvokePlaylistDialogEscape();
                 evt.StopImmediatePropagation();
                 return;
             }
@@ -8939,7 +10248,41 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
 
     private string GetBetterJukeboxPersistentDirectory()
     {
-        return System.IO.Path.Combine(System.IO.Path.Combine(Application.persistentDataPath, "Mods"), "BetterJukebox");
+        string directory = System.IO.Path.Combine(System.IO.Path.Combine(Application.persistentDataPath, "ModsPersistentData"), "BetterJukebox");
+        MigrateLegacyBetterJukeboxDataIfNeeded(directory);
+        return directory;
+    }
+
+    private void MigrateLegacyBetterJukeboxDataIfNeeded(string newDirectory)
+    {
+        try
+        {
+            string oldDirectory = System.IO.Path.Combine(System.IO.Path.Combine(Application.persistentDataPath, "Mods"), "BetterJukebox");
+            if (!System.IO.Directory.Exists(oldDirectory))
+            {
+                return;
+            }
+
+            if (!System.IO.Directory.Exists(newDirectory))
+            {
+                System.IO.Directory.CreateDirectory(newDirectory);
+            }
+
+            string[] fileNames = new string[] { "Favorites.json", "Playlists.json" };
+            for (int i = 0; i < fileNames.Length; i++)
+            {
+                string oldPath = System.IO.Path.Combine(oldDirectory, fileNames[i]);
+                string newPath = System.IO.Path.Combine(newDirectory, fileNames[i]);
+                if (System.IO.File.Exists(oldPath) && !System.IO.File.Exists(newPath))
+                {
+                    System.IO.File.Copy(oldPath, newPath, false);
+                }
+            }
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning("BetterJukebox could not migrate persistent data: " + ex.Message);
+        }
     }
 
     private void EnsureFavoritesFileExists()
@@ -10310,7 +11653,7 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         }
 
         Button button = element as Button;
-        if (button != null)
+        if (button != null && button.name != "betterJukeboxGenreSelectionButton")
         {
             ApplyButtonNormalStyle(button);
         }
@@ -12427,12 +13770,14 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
         SongMeta nextSongQueueSongMeta = GetNextSongQueueSongMeta();
         if (nextSongQueueSongMeta != null)
         {
+            reservedAutomaticNextSongMeta = null;
             return nextSongQueueSongMeta;
         }
 
         SongMeta nextBetterJukeboxQueueSongMeta = GetNextBetterJukeboxQueueSongMeta();
         if (nextBetterJukeboxQueueSongMeta != null)
         {
+            reservedAutomaticNextSongMeta = null;
             return nextBetterJukeboxQueueSongMeta;
         }
 
@@ -12442,9 +13787,16 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
             return null;
         }
 
+        if (reservedAutomaticNextSongMeta != null)
+        {
+            SongMeta reservedSongMeta = reservedAutomaticNextSongMeta;
+            reservedAutomaticNextSongMeta = null;
+            return reservedSongMeta;
+        }
+
         if (modSettings.RandomSelection)
         {
-            return GetNextRandomSongMeta(allSelectableSongMetas);
+            return GetNextAutomaticSongMeta(allSelectableSongMetas);
         }
         else
         {
@@ -12576,6 +13928,161 @@ public class BetterJukeboxControl : MonoBehaviour, INeedInjection, IInjectionFin
             entries.RemoveAt(index);
             SetRealSongQueueEntries(entries);
         }
+    }
+
+    private SongMeta GetNextAutomaticSongMeta(List<SongMeta> allSelectableSongMetas)
+    {
+        if (!modSettings.EnableSmartSongSelection)
+        {
+            return GetNextRandomSongMeta(allSelectableSongMetas);
+        }
+
+        SongMeta smartSongMeta = SelectSmartSongMeta(allSelectableSongMetas, modSettings);
+        return smartSongMeta ?? GetNextRandomSongMeta(allSelectableSongMetas);
+    }
+
+    public static SongMeta SelectSmartSongMeta(IEnumerable<SongMeta> songMetas, BetterJukeboxModSettings settings)
+    {
+        if (songMetas == null)
+        {
+            return null;
+        }
+
+        List<SongMeta> candidates = songMetas.Where(songMeta => songMeta != null).ToList();
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        if (settings == null || !settings.EnableSmartSongSelection)
+        {
+            return RandomUtils.RandomOf(candidates);
+        }
+
+        if (settings.AvoidSameArtistInARow && betterJukeboxHistory.Count > 0)
+        {
+            string latestArtist = NormalizeSmartValue(betterJukeboxHistory[0].Artist);
+            if (!string.IsNullOrEmpty(latestArtist))
+            {
+                List<SongMeta> filtered = candidates.Where(songMeta => NormalizeSmartValue(songMeta.Artist) != latestArtist).ToList();
+                if (filtered.Count > 0)
+                {
+                    candidates = filtered;
+                }
+            }
+        }
+
+        if (settings.AvoidSameGenreInARow && betterJukeboxHistory.Count > 0)
+        {
+            string latestGenre = GetSmartSongGenre(betterJukeboxHistory[0]);
+            if (!string.IsNullOrEmpty(latestGenre))
+            {
+                List<SongMeta> filtered = candidates.Where(songMeta => GetSmartSongGenre(songMeta) != latestGenre).ToList();
+                if (filtered.Count > 0)
+                {
+                    candidates = filtered;
+                }
+            }
+        }
+
+        if (settings.AvoidRecentlyPlayedSongs && betterJukeboxHistory.Count > 0)
+        {
+            int recentCount = Mathf.Clamp(settings.RecentSongWindow, 1, betterJukeboxHistory.Count);
+            List<SongMeta> recentSongs = betterJukeboxHistory.Take(recentCount).ToList();
+            List<SongMeta> filtered = candidates.Where(songMeta => !ContainsSameSmartSong(recentSongs, songMeta)).ToList();
+            if (filtered.Count > 0)
+            {
+                candidates = filtered;
+            }
+        }
+
+        if (settings.PreferSongsNotPlayedThisSession && betterJukeboxHistory.Count > 0)
+        {
+            List<SongMeta> filtered = candidates.Where(songMeta => !ContainsSameSmartSong(betterJukeboxHistory, songMeta)).ToList();
+            if (filtered.Count > 0)
+            {
+                candidates = filtered;
+            }
+        }
+
+        return RandomUtils.RandomOf(candidates);
+    }
+
+    private static bool ContainsSameSmartSong(IEnumerable<SongMeta> songMetas, SongMeta candidate)
+    {
+        if (songMetas == null || candidate == null)
+        {
+            return false;
+        }
+
+        string candidateArtist = NormalizeSmartValue(candidate.Artist);
+        string candidateTitle = NormalizeSmartValue(candidate.Title);
+        foreach (SongMeta songMeta in songMetas)
+        {
+            if (songMeta != null
+                && NormalizeSmartValue(songMeta.Artist) == candidateArtist
+                && NormalizeSmartValue(songMeta.Title) == candidateTitle)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static string GetSmartSongGenre(SongMeta songMeta)
+    {
+        if (songMeta == null)
+        {
+            return "";
+        }
+        try
+        {
+            Type type = songMeta.GetType();
+            string[] memberNames = new string[] { "Genre", "Genres" };
+            for (int i = 0; i < memberNames.Length; i++)
+            {
+                System.Reflection.PropertyInfo property = type.GetProperty(memberNames[i], System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+                if (property != null && property.GetIndexParameters().Length == 0)
+                {
+                    string value = NormalizeGenreText(property.GetValue(songMeta, null));
+                    if (!string.IsNullOrEmpty(value)) { return value; }
+                }
+                System.Reflection.FieldInfo field = type.GetField(memberNames[i], System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+                if (field != null)
+                {
+                    string value = NormalizeGenreText(field.GetValue(songMeta));
+                    if (!string.IsNullOrEmpty(value)) { return value; }
+                }
+            }
+        }
+        catch
+        {
+        }
+        return "";
+    }
+
+    private static string NormalizeGenreText(object value)
+    {
+        if (value == null) { return ""; }
+        System.Collections.IEnumerable enumerable = value as System.Collections.IEnumerable;
+        if (enumerable != null && !(value is string))
+        {
+            foreach (object item in enumerable)
+            {
+                string text = NormalizeSmartValue(item != null ? item.ToString() : "");
+                if (!string.IsNullOrEmpty(text)) { return text; }
+            }
+            return "";
+        }
+        string raw = value.ToString();
+        if (string.IsNullOrWhiteSpace(raw)) { return ""; }
+        string[] parts = raw.Split(new char[] { ';', ',', '/', '|' }, StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length > 0 ? NormalizeSmartValue(parts[0]) : NormalizeSmartValue(raw);
+    }
+
+    private static string NormalizeSmartValue(string value)
+    {
+        return string.IsNullOrEmpty(value) ? "" : value.Trim().ToLowerInvariant();
     }
 
     private SongMeta GetNextRandomSongMeta(List<SongMeta> allSelectableSongMetas)

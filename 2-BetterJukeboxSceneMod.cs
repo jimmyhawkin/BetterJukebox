@@ -8,7 +8,7 @@ using UnityEngine.UIElements;
 
 public class BetterJukeboxSceneMod : ISceneMod
 {
-    private const string JukeboxModePlayerPrefsKey = "BetterJukebox2_JukeboxModeActive";
+    private const string JukeboxModeMarkerFileName = "JukeboxModeActive.txt";
     private static bool jukeboxModeActive;
     private static bool autoStartWasRequested;
     private static bool autoStartWasExecuted;
@@ -113,6 +113,15 @@ public class BetterJukeboxSceneMod : ISceneMod
                         continue;
                     }
 
+                    // This is the native Song Select document. Hide only the visual player list
+                    // while the dedicated Jukebox session is active. Player profiles, microphones,
+                    // SingSceneData, and all native player state remain untouched.
+                    VisualElement nativePlayerList = root.Q<VisualElement>("playerList");
+                    if (nativePlayerList != null)
+                    {
+                        nativePlayerList.style.display = DisplayStyle.None;
+                    }
+
                     GameObject gameObject = new GameObject();
                     BetterJukeboxControl control = gameObject.AddComponent<BetterJukeboxControl>();
                     control.name = "BetterJukeboxSongSelectControl";
@@ -130,7 +139,7 @@ public class BetterJukeboxSceneMod : ISceneMod
                         OnLobbyNextClicked,
                         OnLobbyReturnLiveClicked);
 
-                    BetterJukeboxLog.Info("BetterJukebox 2.0.0.24 - Native BetterJukebox menu added to Song Select");
+                    BetterJukeboxLog.Info("BetterJukebox 2.1.0.31 - Native BetterJukebox menu added to Song Select");
                     return;
                 }
             }
@@ -248,11 +257,11 @@ public class BetterJukeboxSceneMod : ISceneMod
                     jukeboxButton.clicked += OnJukeboxMainMenuButtonClicked;
                     buttonRow.Add(jukeboxButton);
 
-                    BetterJukeboxLog.Info("BetterJukebox 2.0.0.24 - Jukebox button added to native main menu row");
+                    BetterJukeboxLog.Info("BetterJukebox 2.1.0.31 - Jukebox button added to native main menu row");
                     return;
                 }
 
-                BetterJukeboxLog.Warning("BetterJukebox 2.0.0.24 - native main menu button row was not found");
+                BetterJukeboxLog.Warning("BetterJukebox 2.1.0.31 - native main menu button row was not found");
             }
             catch (Exception ex)
             {
@@ -265,17 +274,17 @@ public class BetterJukeboxSceneMod : ISceneMod
     {
         try
         {
-            BetterJukeboxLog.Info("BetterJukebox 2.0.0.24 - Jukebox button clicked");
+            BetterJukeboxLog.Info("BetterJukebox 2.1.0.31 - Jukebox button clicked");
             if (!BeginJukeboxEntry())
             {
-                BetterJukeboxLog.Info("BetterJukebox 2.0.0.24 - duplicate Jukebox entry request ignored");
+                BetterJukeboxLog.Info("BetterJukebox 2.1.0.31 - duplicate Jukebox entry request ignored");
                 return;
             }
 
             object mainSceneControl = FindControlByName("MainSceneControl");
             if (mainSceneControl == null)
             {
-                BetterJukeboxLog.Warning("BetterJukebox 2.0.0.24 - MainSceneControl was not found");
+                BetterJukeboxLog.Warning("BetterJukebox 2.1.0.31 - MainSceneControl was not found");
                 ResetJukeboxEntryRequest();
                 return;
             }
@@ -283,12 +292,12 @@ public class BetterJukeboxSceneMod : ISceneMod
             if (TryInvokeNoArg(mainSceneControl, "OpenSongSelectScene")
                 || TryInvokeNoArg(mainSceneControl, "GoToSongSelectScene"))
             {
-                BetterJukeboxLog.Info("BetterJukebox 2.0.0.24 - opened native Song Select from Jukebox button");
+                BetterJukeboxLog.Info("BetterJukebox 2.1.0.31 - opened native Song Select from Jukebox button");
                 AwaitableUtils.ExecuteAfterDelayInSecondsAsync(1.0f, StartSongSelectWaitOnce);
                 return;
             }
 
-            BetterJukeboxLog.Warning("BetterJukebox 2.0.0.24 - native Song Select method was not found on MainSceneControl");
+            BetterJukeboxLog.Warning("BetterJukebox 2.1.0.31 - native Song Select method was not found on MainSceneControl");
             LogNoArgMethods(mainSceneControl);
             ResetJukeboxEntryRequest();
         }
@@ -300,26 +309,63 @@ public class BetterJukeboxSceneMod : ISceneMod
     }
 
 
+    private string GetJukeboxModeMarkerPath()
+    {
+        return System.IO.Path.Combine(
+            System.IO.Path.Combine(System.IO.Path.Combine(Application.persistentDataPath, "ModsPersistentData"), "BetterJukebox"),
+            JukeboxModeMarkerFileName);
+    }
+
+    private void WriteJukeboxModeMarker(bool isActive)
+    {
+        try
+        {
+            string path = GetJukeboxModeMarkerPath();
+            string directory = System.IO.Path.GetDirectoryName(path);
+            if (!System.IO.Directory.Exists(directory))
+            {
+                System.IO.Directory.CreateDirectory(directory);
+            }
+            System.IO.File.WriteAllText(path, isActive ? "1" : "0");
+        }
+        catch (System.Exception ex)
+        {
+            BetterJukeboxLog.Warning("BetterJukebox could not save Jukebox session marker: " + ex.Message);
+        }
+    }
+
+    private bool ReadJukeboxModeMarker()
+    {
+        try
+        {
+            string path = GetJukeboxModeMarkerPath();
+            return System.IO.File.Exists(path) && System.IO.File.ReadAllText(path).Trim() == "1";
+        }
+        catch (System.Exception ex)
+        {
+            BetterJukeboxLog.Warning("BetterJukebox could not read Jukebox session marker: " + ex.Message);
+            return false;
+        }
+    }
+
     private void EnterJukeboxMode()
     {
         jukeboxModeActive = true;
-        PlayerPrefs.SetInt(JukeboxModePlayerPrefsKey, 1);
-        PlayerPrefs.Save();
+        WriteJukeboxModeMarker(true);
     }
 
     private void ExitJukeboxMode()
     {
         jukeboxModeActive = false;
-        PlayerPrefs.SetInt(JukeboxModePlayerPrefsKey, 0);
-        PlayerPrefs.Save();
+        WriteJukeboxModeMarker(false);
     }
 
     private void RestoreJukeboxModeMarker()
     {
-        if (!jukeboxModeActive && PlayerPrefs.GetInt(JukeboxModePlayerPrefsKey, 0) == 1)
+        if (!jukeboxModeActive && ReadJukeboxModeMarker())
         {
             jukeboxModeActive = true;
-            BetterJukeboxLog.Info("BetterJukebox 2.0.0.24 - restored Jukebox mode marker");
+            BetterJukeboxLog.Info("BetterJukebox 2.1.0.31 - restored Jukebox mode marker");
         }
     }
 
