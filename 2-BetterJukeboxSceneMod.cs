@@ -6,8 +6,11 @@ using UniRx;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-public class BetterJukeboxSceneMod : ISceneMod
+public class BetterJukeboxSceneMod : ISceneMod, IOnLoadMod
 {
+    private static int mainMenuWatcherGeneration;
+    private bool initialMainSceneInstallCheckScheduled;
+
     private const string JukeboxModeMarkerFileName = "JukeboxModeActive.txt";
     private static bool jukeboxModeActive;
     private static bool autoStartWasRequested;
@@ -41,8 +44,141 @@ public class BetterJukeboxSceneMod : ISceneMod
     [Inject]
     private SceneNavigator sceneNavigator;
 
+    public void OnLoadMod()
+    {
+        // Melody Mania's ModManager invokes IOnLoadMod only after mod settings are
+        // loaded and the mod object has been dependency-injected. This is the
+        // correct lifecycle hook for Workshop mods that can finish loading after
+        // MainScene has already been entered.
+        if (modSettings != null)
+        {
+            modSettings.ActivateImmediatePersistence();
+        }
+
+        int generation = ++mainMenuWatcherGeneration;
+        BetterJukeboxLog.Info(
+            "BetterJukebox 2.1.2.29 - mod-load main-menu watcher started (generation "
+            + generation + ")");
+
+        WatchForNativeMainMenuAfterModLoad(0, generation);
+    }
+
+    private void WatchForNativeMainMenuAfterModLoad(int attempt, int generation)
+    {
+        // Ignore delayed callbacks that belong to an obsolete pre-reload instance.
+        if (generation != mainMenuWatcherGeneration)
+        {
+            return;
+        }
+
+        try
+        {
+            UIDocument[] uiDocuments = UnityEngine.Object.FindObjectsOfType<UIDocument>();
+            for (int i = 0; i < uiDocuments.Length; i++)
+            {
+                UIDocument uiDocument = uiDocuments[i];
+                if (uiDocument == null || uiDocument.rootVisualElement == null)
+                {
+                    continue;
+                }
+
+                VisualElement root = uiDocument.rootVisualElement;
+                Button existingButton = root.Q<Button>("betterJukeboxMainMenuButton");
+                if (existingButton != null)
+                {
+                    BetterJukeboxLog.Info(
+                        "BetterJukebox 2.1.2.29 - Jukebox main-menu button already present");
+                    return;
+                }
+
+                Button startButton = root.Q<Button>("startButton");
+                if (startButton == null || startButton.parent == null)
+                {
+                    continue;
+                }
+
+                BetterJukeboxLog.Info(
+                    "BetterJukebox 2.1.2.29 - native MainScene startButton found by mod-load watcher after attempt "
+                    + (attempt + 1));
+
+                // Reuse the exact same native installer used by scene transitions.
+                TryInstallJukeboxMainMenuButton(0);
+                return;
+            }
+
+            // Workshop discovery/update can finish after the first MainScene event.
+            // Keep this bounded but long enough to cover slower startup systems.
+            if (attempt < 79)
+            {
+                if (attempt == 0 || attempt == 19 || attempt == 39 || attempt == 59)
+                {
+                    BetterJukeboxLog.Info(
+                        "BetterJukebox 2.1.2.29 - native MainScene startButton not available yet; watcher attempt "
+                        + (attempt + 1));
+                }
+
+                AwaitableUtils.ExecuteAfterDelayInSecondsAsync(
+                    0.25f,
+                    () => WatchForNativeMainMenuAfterModLoad(attempt + 1, generation));
+                return;
+            }
+
+            BetterJukeboxLog.Warning(
+                "BetterJukebox 2.1.2.29 - mod-load watcher timed out after 20 seconds without finding native MainScene startButton");
+        }
+        catch (Exception ex)
+        {
+            BetterJukeboxLog.Exception(ex);
+        }
+    }
+
+    private void EnsureInitialMainSceneButtonInstall()
+    {
+        if (initialMainSceneInstallCheckScheduled)
+        {
+            return;
+        }
+
+        initialMainSceneInstallCheckScheduled = true;
+
+        // Keep the scene-lifecycle path as an additional safety trigger.
+        // The primary first-start path is now IOnLoadMod above.
+        AwaitableUtils.ExecuteAfterDelayInFramesAsync(1, () =>
+        {
+            try
+            {
+                UIDocument[] uiDocuments = UnityEngine.Object.FindObjectsOfType<UIDocument>();
+                for (int i = 0; i < uiDocuments.Length; i++)
+                {
+                    UIDocument uiDocument = uiDocuments[i];
+                    if (uiDocument == null || uiDocument.rootVisualElement == null)
+                    {
+                        continue;
+                    }
+
+                    VisualElement root = uiDocument.rootVisualElement;
+                    Button startButton = root.Q<Button>("startButton");
+                    if (startButton != null && startButton.parent != null)
+                    {
+                        InstallJukeboxMainMenuButton();
+                        return;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                BetterJukeboxLog.Exception(ex);
+            }
+        });
+    }
+
     public void OnSceneEntered(SceneEnteredContext sceneEnteredContext)
     {
+        EnsureInitialMainSceneButtonInstall();
+        if (modSettings != null)
+        {
+            modSettings.ActivateImmediatePersistence();
+        }
 
         if (sceneEnteredContext.Scene == EScene.MainScene)
         {
@@ -122,6 +258,13 @@ public class BetterJukeboxSceneMod : ISceneMod
                         nativePlayerList.style.display = DisplayStyle.None;
                     }
 
+                    // Jukebox owns Song Select presentation only. Hide the native
+                    // top-right controls and difficulty selector that are redundant
+                    // in the dedicated Jukebox experience. Their underlying native
+                    // settings/state are left untouched and Sing remains completely native.
+                    HideJukeboxOnlyNativeSongSelectControls(root);
+                    AwaitableUtils.ExecuteAfterDelayInFramesAsync(2, () => HideJukeboxOnlyNativeSongSelectControls(root));
+
                     GameObject gameObject = new GameObject();
                     BetterJukeboxControl control = gameObject.AddComponent<BetterJukeboxControl>();
                     control.name = "BetterJukeboxSongSelectControl";
@@ -139,7 +282,7 @@ public class BetterJukeboxSceneMod : ISceneMod
                         OnLobbyNextClicked,
                         OnLobbyReturnLiveClicked);
 
-                    BetterJukeboxLog.Info("BetterJukebox 2.1.1.1 - Native BetterJukebox menu added to Song Select");
+                    BetterJukeboxLog.Info("BetterJukebox 2.1.2.29 - Native BetterJukebox menu added to Song Select");
                     return;
                 }
             }
@@ -148,6 +291,115 @@ public class BetterJukeboxSceneMod : ISceneMod
                 BetterJukeboxLog.Exception(ex);
             }
         });
+    }
+
+    private void HideJukeboxOnlyNativeSongSelectControls(VisualElement root)
+    {
+        if (root == null)
+        {
+            return;
+        }
+
+        try
+        {
+            Rect rootBounds = root.worldBound;
+            if (rootBounds.width <= 0f || rootBounds.height <= 0f)
+            {
+                return;
+            }
+
+            // The native Song Select utility/settings buttons form the compact
+            // cluster in the upper-right corner. This runs before BetterJukebox
+            // adds its own overlay, so only native buttons can match this region.
+            System.Collections.Generic.List<Button> buttons = root.Query<Button>().ToList();
+            for (int i = 0; i < buttons.Count; i++)
+            {
+                Button button = buttons[i];
+                if (button == null || button.style.display == DisplayStyle.None)
+                {
+                    continue;
+                }
+
+                Rect bounds = button.worldBound;
+                if (bounds.width <= 0f || bounds.height <= 0f)
+                {
+                    continue;
+                }
+
+                float centerX = (bounds.center.x - rootBounds.xMin) / rootBounds.width;
+                float centerY = (bounds.center.y - rootBounds.yMin) / rootBounds.height;
+                if (centerX >= 0.78f && centerY <= 0.18f)
+                {
+                    button.style.display = DisplayStyle.None;
+                }
+
+                // Difficulty is the compact native control in the lower-right.
+                // Prefer its text when available so normal Song Select buttons are
+                // never hidden just because they happen to be near the bottom edge.
+                string buttonText = button.text ?? "";
+                if (centerX >= 0.72f && centerY >= 0.78f && IsNativeDifficultyText(buttonText))
+                {
+                    button.style.display = DisplayStyle.None;
+                }
+            }
+
+            // Some Melody Mania builds render the difficulty text as a Label
+            // inside another visual element instead of directly on a Button.
+            System.Collections.Generic.List<Label> labels = root.Query<Label>().ToList();
+            for (int i = 0; i < labels.Count; i++)
+            {
+                Label label = labels[i];
+                if (label == null || !IsNativeDifficultyText(label.text))
+                {
+                    continue;
+                }
+
+                Rect bounds = label.worldBound;
+                if (bounds.width <= 0f || bounds.height <= 0f)
+                {
+                    continue;
+                }
+
+                float centerX = (bounds.center.x - rootBounds.xMin) / rootBounds.width;
+                float centerY = (bounds.center.y - rootBounds.yMin) / rootBounds.height;
+                if (centerX < 0.72f || centerY < 0.78f)
+                {
+                    continue;
+                }
+
+                VisualElement target = label;
+                VisualElement parent = label.parent;
+                for (int depth = 0; depth < 3 && parent != null; depth++)
+                {
+                    Rect parentBounds = parent.worldBound;
+                    if (parentBounds.width > 0f
+                        && parentBounds.width <= 360f
+                        && parentBounds.height > 0f
+                        && parentBounds.height <= 120f)
+                    {
+                        target = parent;
+                        parent = parent.parent;
+                        continue;
+                    }
+                    break;
+                }
+                target.style.display = DisplayStyle.None;
+            }
+        }
+        catch (Exception ex)
+        {
+            BetterJukeboxLog.Warning("BetterJukebox Jukebox-only Song Select cleanup failed: " + ex.Message);
+        }
+    }
+
+    private bool IsNativeDifficultyText(string text)
+    {
+        string value = (text ?? "").Trim();
+        return value == "Easy"
+            || value == "Medium"
+            || value == "Hard"
+            || value == "Normal"
+            || value == "Expert";
     }
 
     private void OnLobbyPreviousClicked()
@@ -216,58 +468,132 @@ public class BetterJukeboxSceneMod : ISceneMod
 
     private void InstallJukeboxMainMenuButton()
     {
-        AwaitableUtils.ExecuteAfterDelayInFramesAsync(1, () =>
+        // MainScene UI Toolkit documents are not guaranteed to be fully built one
+        // frame after scene entry on every machine/resolution/DPI configuration.
+        AwaitableUtils.ExecuteAfterDelayInFramesAsync(1, () => TryInstallJukeboxMainMenuButton(0));
+    }
+
+    private void TryInstallJukeboxMainMenuButton(int attempt)
+    {
+        try
         {
-            try
+            UIDocument[] uiDocuments = UnityEngine.Object.FindObjectsOfType<UIDocument>();
+            for (int i = 0; i < uiDocuments.Length; i++)
             {
-                UIDocument[] uiDocuments = UnityEngine.Object.FindObjectsOfType<UIDocument>();
-                for (int i = 0; i < uiDocuments.Length; i++)
+                UIDocument uiDocument = uiDocuments[i];
+                if (uiDocument == null || uiDocument.rootVisualElement == null)
                 {
-                    UIDocument uiDocument = uiDocuments[i];
-                    if (uiDocument == null || uiDocument.rootVisualElement == null)
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
-                    VisualElement root = uiDocument.rootVisualElement;
-                    if (root.Q<Button>("betterJukeboxMainMenuButton") != null)
-                    {
-                        return;
-                    }
-
-                    Button startButton = root.Q<Button>("startButton");
-                    if (startButton != null)
-                    {
-                        startButton.clicked += ExitJukeboxMode;
-                    }
-                    VisualElement buttonRow = startButton != null ? startButton.parent : root.Q<VisualElement>("row");
-                    if (buttonRow == null)
-                    {
-                        continue;
-                    }
-
-                    Button jukeboxButton = new Button();
-                    jukeboxButton.name = "betterJukeboxMainMenuButton";
-                    jukeboxButton.text = "Jukebox";
-                    jukeboxButton.AddToClassList("mainSceneButton");
-                    jukeboxButton.AddToClassList("ml-5");
-                    jukeboxButton.style.width = new StyleLength(new Length(160f, LengthUnit.Pixel));
-                    jukeboxButton.style.height = new StyleLength(new Length(60f, LengthUnit.Pixel));
-                    jukeboxButton.style.fontSize = new StyleLength(new Length(18f, LengthUnit.Pixel));
-                    jukeboxButton.clicked += OnJukeboxMainMenuButtonClicked;
-                    buttonRow.Add(jukeboxButton);
-
-                    BetterJukeboxLog.Info("BetterJukebox 2.1.1.1 - Jukebox button added to native main menu row");
+                VisualElement root = uiDocument.rootVisualElement;
+                Button existingButton = root.Q<Button>("betterJukeboxMainMenuButton");
+                if (existingButton != null)
+                {
+                    // A button can exist in the visual tree before UI Toolkit has
+                    // completed geometry/layout. Verify that it is actually laid out.
+                    AwaitableUtils.ExecuteAfterDelayInFramesAsync(
+                        2,
+                        () => VerifyJukeboxMainMenuButtonLayout(existingButton, null, attempt));
                     return;
                 }
 
-                BetterJukeboxLog.Warning("BetterJukebox 2.1.1.1 - native main menu button row was not found");
+                Button startButton = root.Q<Button>("startButton");
+                if (startButton == null || startButton.parent == null)
+                {
+                    continue;
+                }
+
+                VisualElement buttonRow = startButton.parent;
+
+                Button jukeboxButton = new Button();
+                jukeboxButton.name = "betterJukeboxMainMenuButton";
+                jukeboxButton.text = "Jukebox";
+
+                // Match Melody Mania's native MainScene buttons exactly.
+                // MainSceneUi.uxml defines partyButton / onlineGameButton as:
+                // class="mainSceneButton ml-5"
+                // style="width: 160px; height: 60px; font-size: 18px;"
+                //
+                // These are UI Toolkit panel pixels, not physical screen pixels.
+                // Melody Mania's PanelSettings / UI Scale handles actual 1440p/4K
+                // scaling, so using the native UXML dimensions is correct.
+                jukeboxButton.AddToClassList("mainSceneButton");
+                jukeboxButton.AddToClassList("ml-5");
+                jukeboxButton.style.width = new StyleLength(new Length(160f, LengthUnit.Pixel));
+                jukeboxButton.style.height = new StyleLength(new Length(60f, LengthUnit.Pixel));
+                jukeboxButton.style.fontSize = new StyleLength(new Length(18f, LengthUnit.Pixel));
+                jukeboxButton.clicked += OnJukeboxMainMenuButtonClicked;
+                buttonRow.Add(jukeboxButton);
+
+                // Give UI Toolkit time to calculate resolved geometry. A resolution
+                // change used to force this later; now BetterJukebox verifies it itself.
+                AwaitableUtils.ExecuteAfterDelayInFramesAsync(
+                    2,
+                    () => VerifyJukeboxMainMenuButtonLayout(jukeboxButton, startButton, attempt));
+                return;
             }
-            catch (Exception ex)
+
+            ScheduleJukeboxMainMenuButtonRetry(attempt);
+        }
+        catch (Exception ex)
+        {
+            BetterJukeboxLog.Exception(ex);
+        }
+    }
+
+    private void VerifyJukeboxMainMenuButtonLayout(Button jukeboxButton, Button startButton, int attempt)
+    {
+        try
+        {
+            if (jukeboxButton != null
+                && jukeboxButton.panel != null
+                && jukeboxButton.parent != null
+                && jukeboxButton.resolvedStyle.width > 1f
+                && jukeboxButton.resolvedStyle.height > 1f)
             {
-                BetterJukeboxLog.Exception(ex);
+                if (startButton != null)
+                {
+                    startButton.clicked += ExitJukeboxMode;
+                }
+
+                BetterJukeboxLog.Info(
+                    "BetterJukebox 2.1.2.29 - Jukebox button visible with native layout "
+                    + jukeboxButton.resolvedStyle.width + "x" + jukeboxButton.resolvedStyle.height
+                    + " after attempt " + (attempt + 1));
+                return;
             }
-        });
+
+            if (jukeboxButton != null && jukeboxButton.parent != null)
+            {
+                jukeboxButton.RemoveFromHierarchy();
+            }
+
+            BetterJukeboxLog.Warning(
+                "BetterJukebox 2.1.2.29 - Jukebox button had no resolved geometry; retrying native layout");
+            ScheduleJukeboxMainMenuButtonRetry(attempt);
+        }
+        catch (Exception ex)
+        {
+            BetterJukeboxLog.Exception(ex);
+            ScheduleJukeboxMainMenuButtonRetry(attempt);
+        }
+    }
+
+    private void ScheduleJukeboxMainMenuButtonRetry(int attempt)
+    {
+        // Retry every 0.25 seconds for up to about 20 seconds. This stays bounded
+        // and stops as soon as the button has real resolved geometry.
+        if (attempt < 79)
+        {
+            AwaitableUtils.ExecuteAfterDelayInSecondsAsync(
+                0.25f,
+                () => TryInstallJukeboxMainMenuButton(attempt + 1));
+            return;
+        }
+
+        BetterJukeboxLog.Warning(
+            "BetterJukebox 2.1.2.29 - native MainScene button could not be installed with valid geometry after 80 attempts");
     }
 
     private void OnJukeboxMainMenuButtonClicked()

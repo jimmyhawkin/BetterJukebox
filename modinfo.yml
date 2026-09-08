@@ -1,54 +1,16 @@
 name: Better Jukebox
-version: 2.1.1.6
+version: 2.1.2.29
 description : |
-  BetterJukebox v2.1.1.6 - Progress Jump Default On
+  BetterJukebox v2.1.2.29 - Mod Load Main Menu Watcher Test
 
-  - Replaces the temporary Song Select lobby design
-  - Uses BetterJukebox's existing overlay button builders and theme styling
-  - Shows only Next, Search, Queue, History and Settings in Jukebox Song Select
-  - Opens the real BetterJukebox Search, Queue, History and Settings panels
-  - Next starts the first native queued song when available
-  - Random song selection is used only when the native queue is empty
-  - Song Select Jukebox menu remains permanently visible
-  - Menu appears only after entering through Jukebox
-  - Entering through Sing never creates BetterJukebox UI or automation
-  - Auto Play on Jukebox entry also prioritizes the native queue
-  - Auto Continue prioritizes the native queue before random fallback
-  - Native SongQueueManager remains the single queue owner
-  - Routine diagnostic logging is disabled by default
-  - Debug Logging can be enabled from BetterJukebox Settings
-  - History hold and History panel Go Live use one shared Queue-first / Random-fallback path
-  - Hides the native Song Select player icon list only in Jukebox mode
-  - Native Sing player selection remains unchanged
-  - Adds a dedicated Smart Jukebox settings section
-  - Enable Smart Song Selection is the master switch in the Smart Song Selection section header
-  - Smart selection only runs when the native Queue is empty
-  - Can avoid the same artist in a row
-  - Can avoid recently played songs with a configurable window
-  - Can prefer songs not yet played in the current session
-  - Can avoid the same exact genre in a row (default Off)
-  - Smart Song Selection sub-options are disabled visually when the master switch is Off
-  - New Playlist now offers Create Empty Playlist or Create From Genre
-  - Create From Genre supports selecting multiple genre values
-  - Playlist naming is shown after genre selection with the first selected genre as the editable suggestion
-  - Genre playlists are built from Melody Mania's loaded SongMeta and native Song IDs
-  - Native Queue order and contents are never modified
-  - New Playlist choices use spaced option cards with descriptions
-  - Escape closes New Playlist and navigates back one step in the genre playlist flow
-  - Genre selection keeps a clear visual gap above the fixed footer controls
-
-  - Adds Create Top Played Playlist using Melody Mania native StatisticsManager data
-  - Top Played size is user-selectable and ranked by TimesFinished, then TimesStarted
-  - Adds Create All-Time Favorites containing all songs with native play history
-  - Statistics playlist dialogs follow the same ESC back-stack as other playlist creation dialogs
-  - Stores BetterJukebox persistent data under ModsPersistentData/BetterJukebox
-  - Removes the Jukebox session marker from Unity PlayerPrefs and stores it with BetterJukebox data
-  - Migrates legacy BetterJukebox settings, favorites and playlists when needed
-  - Now Playing shows the actual next song
-  - Native Queue is previewed first and always remains authoritative
-  - When Queue is empty, Smart Song Selection reserves and previews the next automatic song
-  - If Smart Song Selection is disabled, the next normal random song is reserved and previewed
-  - A newly queued song immediately replaces and cancels any automatic reservation while Now Playing is visible
+  - Uses Melody Mania PlaylistManager.FavoritesPlaylist as the single Favorites backend
+  - BetterJukebox Favorites UI, stars, Queue All and Shuffle now read/write native Favorites
+  - Detects legacy BetterJukebox Favorites.json and offers a one-time import
+  - Merges legacy favorites with existing Melody Mania favorites without duplicates
+  - Deletes the old favorites file automatically after a complete verified migration
+  - If migration is incomplete, shows a dialog to Keep File or Delete Old File
+  - Keeps playlist filters, blacklist, queue, playback and Sing behavior unchanged
+  - Builds on v2.1.2.18 Native Settings Compile Fix Test
 
 authors:
   - Jimmy Berglund
@@ -61,4 +23,3 @@ requiredTypes:
   - System.Reflection.ParameterInfo
   - System.Security.Cryptography.MD5
   - System.Text.Encoding
-

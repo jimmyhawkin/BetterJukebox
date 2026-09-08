@@ -3,8 +3,9 @@ using UnityEngine;
 
 public class BetterJukeboxModSettings : IModSettings
 {
-    private const string PersistentSettingsVersion = "2.1.1.6";
+    private const string PersistentSettingsVersion = "2.1.2.29";
     private static bool isLoadingPersistentSettings;
+    private bool persistentWritesActivated;
 
     private bool enableBetterJukebox = true;
     private bool autoStartJukebox = false;
@@ -103,11 +104,29 @@ public class BetterJukeboxModSettings : IModSettings
 
     private void SavePersistentSettingsIfReady()
     {
-        if (isLoadingPersistentSettings)
+        // During mod creation/reload Melody Mania may hydrate IModSettings
+        // properties after this constructor has already loaded our persistent
+        // file. Those hydration setter calls must never overwrite newer values.
+        // Writes are enabled only after the mod has been injected/initialized and
+        // we have reloaded the authoritative persistent file one final time.
+        if (isLoadingPersistentSettings || !persistentWritesActivated)
         {
             return;
         }
         SavePersistentSettings();
+    }
+
+    public void ActivateImmediatePersistence()
+    {
+        if (persistentWritesActivated)
+        {
+            return;
+        }
+
+        // Re-read after Melody Mania has finished hydrating IModSettings. This
+        // restores the values that were saved at the moment the user changed them.
+        LoadPersistentSettings();
+        persistentWritesActivated = true;
     }
 
     private static string GetPersistentSettingsDirectory()
@@ -265,7 +284,22 @@ public class BetterJukeboxModSettings : IModSettings
             AppendInt(builder, "UiTheme", uiTheme, false);
             builder.AppendLine("}");
 
-            System.IO.File.WriteAllText(GetPersistentSettingsPath(), builder.ToString());
+            string settingsPath = GetPersistentSettingsPath();
+            string tempPath = settingsPath + ".tmp";
+            string settingsText = builder.ToString();
+
+            // User changes must be durable immediately and must not depend on
+            // game shutdown / mod unload. Use the same simple File API that is
+            // already known to compile in Melody Mania's restricted Mono context.
+            System.IO.File.WriteAllText(tempPath, settingsText);
+            System.IO.File.Copy(tempPath, settingsPath, true);
+            try
+            {
+                System.IO.File.Delete(tempPath);
+            }
+            catch
+            {
+            }
         }
         catch (System.Exception ex)
         {
